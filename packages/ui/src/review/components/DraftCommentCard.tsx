@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { formatLineRangeLabel, type DraftComment } from "@guided-review/ui/review/commentTypes";
+import { formatCommentTarget, type DraftComment } from "@guided-review/ui/review/commentTypes";
 import { Button, Kbd, Textarea } from "@guided-review/ui";
 import { ModEnterChord } from "./ShortcutKeys";
 
@@ -59,11 +59,10 @@ export function DraftCommentCard({ comment, onRemove, onUpdate }: DraftCommentCa
       className="border-y border-border bg-surface px-3 py-2.5"
       data-testid="draft-comment"
       data-draft-id={comment.id}
+      data-draft-scope={comment.scope}
     >
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <span className="font-mono text-xs text-muted">
-          Draft · {formatLineRangeLabel(comment.filePath, comment.startLine, comment.endLine)}
-        </span>
+        <span className="font-mono text-xs text-muted">Draft · {formatCommentTarget(comment)}</span>
         <div className="flex items-center gap-1">
           {!editing && (
             <button

@@ -3,6 +3,7 @@ import { cn } from "@guided-review/ui";
 import { buildSplitRows, type SplitCell } from "@guided-review/ui/review/buildSplitRows";
 import {
   CodeContent,
+  CommentLineButton,
   DIFF_LINE_WRAP,
   highlightHunkLines,
   LineExtras,
@@ -30,6 +31,7 @@ function SplitCellView({
   if (cell.kind === "empty") {
     return (
       <div className={cn(DIFF_LINE_WRAP, "flex-1 overflow-hidden")}>
+        <CommentLineButton lineId={undefined} />
         <span className={lineNumberClasses(false)} />
         <span className="min-w-0 flex-1" />
       </div>
@@ -46,7 +48,7 @@ function SplitCellView({
     <div
       className={cn(
         DIFF_LINE_WRAP,
-        "flex-1 overflow-hidden",
+        "group/line flex-1 overflow-hidden",
         showDiffBg && cell.type === "del" && "bg-diff-del-bg",
         showDiffBg && cell.type === "add" && "bg-diff-add-bg",
         selectionClasses(lineId, selectedIds, focusId),
@@ -56,6 +58,7 @@ function SplitCellView({
       data-testid={isFocus ? "diff-line-focus" : undefined}
       aria-current={isFocus ? "true" : undefined}
     >
+      <CommentLineButton lineId={lineId} />
       <span
         className={lineNumberClasses(highlightNumber)}
         data-testid={highlightNumber ? "diff-line-number-highlight" : undefined}

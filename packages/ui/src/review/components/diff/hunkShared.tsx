@@ -33,6 +33,46 @@ export interface HunkViewProps {
 /** Soft-wrap long lines (e.g. SVG paths) like GitHub — no horizontal scroll bleed. */
 export const DIFF_LINE_WRAP = "flex min-w-0 whitespace-pre-wrap break-all pr-3";
 
+/**
+ * Hover/focus affordance for commenting on one line, in the gutter ahead of
+ * the line numbers. Rendered for every commentable row, so it is kept cheap:
+ * visibility is CSS-only (`group-hover`), with no per-row state.
+ *
+ * Shift-click extends the current selection, matching the keyboard's
+ * Shift+Arrow. Rows without a selectable id (split-view padding, image rows)
+ * pass `lineId === undefined` and get an inert spacer so columns still align.
+ */
+export function CommentLineButton({ lineId }: { lineId: string | undefined }) {
+  const startCommentAtLine = useReviewStore((s) => s.startCommentAtLine);
+
+  if (!lineId) return <span className="w-5 shrink-0" aria-hidden="true" />;
+
+  return (
+    <span className="relative w-5 shrink-0 select-none">
+      <button
+        type="button"
+        // Stays in the DOM (not `hidden`) so keyboard focus can reach it.
+        className={cn(
+          "absolute inset-y-0 left-0 flex w-5 items-center justify-center opacity-0",
+          "cursor-pointer rounded-sm bg-primary text-primary-foreground",
+          "group-hover/line:opacity-100 focus-visible:opacity-100",
+        )}
+        aria-label="Comment on this line"
+        title="Comment on this line (shift-click to extend)"
+        data-testid="comment-line-button"
+        onClick={(event) => {
+          event.stopPropagation();
+          startCommentAtLine(lineId, event.shiftKey);
+        }}
+      >
+        <span aria-hidden="true" className="text-xs leading-none">
+          +
+        </span>
+      </button>
+    </span>
+  );
+}
+
 export function selectionClasses(
   lineId: string | undefined,
   selectedIds: Set<string>,

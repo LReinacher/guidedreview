@@ -5,7 +5,11 @@ import type { DiffFile } from "@guided-review/core";
 import { GitError, runGitBuffer } from "./run";
 import type { DiffScopeId, LocalReviewSnapshot } from "./localDiff";
 
-export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+/** Cap for any blob we read out of git or the worktree, image or text. */
+export const MAX_BLOB_BYTES = 8 * 1024 * 1024;
+
+/** Most context lines one gap-expansion request may return. */
+export const MAX_CONTEXT_LINES = 500;
 
 /** Which side of a file change to load for an image preview. */
 export const FILE_PREVIEW_SIDES = ["old", "new"] as const;
@@ -50,7 +54,7 @@ async function gitShow(repoRoot: string, spec: string): Promise<Buffer | null> {
 
 /**
  * Read a file from the live worktree (unstaged / uncommitted new side).
- * Caps at MAX_IMAGE_BYTES so a huge binary can't blow the preview endpoint.
+ * Caps at MAX_BLOB_BYTES so a huge binary can't blow the preview endpoint.
  */
 async function readWorktree(repoRoot: string, filePath: string): Promise<Buffer | null> {
   const resolved = resolveWorktreePath(repoRoot, filePath);
@@ -58,7 +62,7 @@ async function readWorktree(repoRoot: string, filePath: string): Promise<Buffer 
   try {
     const info = await stat(resolved);
     if (!info.isFile()) return null;
-    if (info.size > MAX_IMAGE_BYTES) return null;
+    if (info.size > MAX_BLOB_BYTES) return null;
     return await readFile(resolved);
   } catch {
     return null;
@@ -78,7 +82,7 @@ export async function readReviewImage(
   if (!file || !isImagePath(file.path)) return null;
 
   const bytes = side === "old" ? await readOld(snapshot, file) : await readNew(snapshot, file);
-  if (!bytes || bytes.byteLength === 0 || bytes.byteLength > MAX_IMAGE_BYTES) return null;
+  if (!bytes || bytes.byteLength === 0 || bytes.byteLength > MAX_BLOB_BYTES) return null;
 
   const mime = imageMimeType(file.path);
   if (!mime) return null;
@@ -114,4 +118,40 @@ async function readNew(snapshot: LocalReviewSnapshot, file: DiffFile): Promise<B
   if (selectedScope === "unstaged") return readWorktree(repo.repoRoot, blobPath);
   if (repo.staged) return gitShow(repo.repoRoot, `:${blobPath}`);
   return readWorktree(repo.repoRoot, blobPath);
+}
+
+/** Heuristic: a NUL byte near the start means this is not text worth rendering. */
+function looksBinary(bytes: Buffer): boolean {
+  return bytes.subarray(0, 8000).includes(0);
+}
+
+/**
+ * Text lines `[startLine, endLine]` (1-indexed, inclusive) from one side of a
+ * file in the current snapshot — the context the overlay reveals when the user
+ * expands a collapsed gap between hunks. Only files in the parsed diff are
+ * readable, and the range is capped so one click cannot pull a whole monorepo
+ * file across the wire.
+ */
+export async function readReviewFileLines(
+  snapshot: LocalReviewSnapshot,
+  filePath: string,
+  side: FilePreviewSide,
+  startLine: number,
+  endLine: number,
+): Promise<string[] | null> {
+  const file = snapshot.diff.files.find((entry) => entry.path === filePath);
+  if (!file || file.isBinaryOrElided || isImagePath(file.path)) return null;
+  if (startLine < 1 || endLine < startLine) return null;
+  if (endLine - startLine + 1 > MAX_CONTEXT_LINES) return null;
+
+  const bytes = side === "old" ? await readOld(snapshot, file) : await readNew(snapshot, file);
+  if (!bytes || bytes.byteLength > MAX_BLOB_BYTES || looksBinary(bytes)) return null;
+
+  const lines = bytes.toString("utf8").split("\n");
+  // A trailing newline leaves a final empty element that is not a real line.
+  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  if (startLine > lines.length) return [];
+  return lines
+    .slice(startLine - 1, Math.min(endLine, lines.length))
+    .map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
 }

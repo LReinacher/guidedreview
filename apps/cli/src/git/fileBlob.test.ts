@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { buildLocalReview } from "./localDiff";
-import { readReviewImage } from "./fileBlob";
+import { MAX_CONTEXT_LINES, readReviewFileLines, readReviewImage } from "./fileBlob";
 
 const execFileAsync = promisify(execFile);
 
@@ -60,5 +60,69 @@ describe("readReviewImage", () => {
     expect(newSvg?.bytes.toString("utf8")).toBe(SVG_NEW);
     expect(oldSvg).toBeNull();
     expect(await readReviewImage(snapshot, "missing.png", "new")).toBeNull();
+  });
+});
+
+/** A text file long enough to have a collapsed gap between its two edits. */
+async function makeTextRepo(): Promise<string> {
+  const dir = await mkdir(path.join(os.tmpdir(), `gr-txt-${Date.now()}-${Math.random()}`), {
+    recursive: true,
+  });
+  const root = dir!;
+  const body = (marker: string) =>
+    Array.from({ length: 60 }, (_, i) => (i === 0 || i === 59 ? marker : `line ${i + 1}`)).join(
+      "\n",
+    ) + "\n";
+
+  await git(root, ["init", "-b", "main"]);
+  await git(root, ["config", "user.email", "test@example.com"]);
+  await git(root, ["config", "user.name", "Test"]);
+  await writeFile(path.join(root, "big.ts"), body("old"));
+  await git(root, ["add", "big.ts"]);
+  await git(root, ["commit", "-m", "initial"]);
+  await git(root, ["checkout", "-b", "feat"]);
+  await writeFile(path.join(root, "big.ts"), body("new"));
+  await git(root, ["add", "big.ts"]);
+  await git(root, ["commit", "-m", "edit both ends"]);
+  return root;
+}
+
+describe("readReviewFileLines", () => {
+  it("returns the requested inclusive range from the new side", async () => {
+    const root = await makeTextRepo();
+    const snapshot = await buildLocalReview({ cwd: root, scope: "branch" });
+
+    expect(await readReviewFileLines(snapshot, "big.ts", "new", 11, 13)).toEqual([
+      "line 11",
+      "line 12",
+      "line 13",
+    ]);
+    // Old side reads the pre-image, so the changed first line differs.
+    expect(await readReviewFileLines(snapshot, "big.ts", "old", 1, 1)).toEqual(["old"]);
+    expect(await readReviewFileLines(snapshot, "big.ts", "new", 1, 1)).toEqual(["new"]);
+  });
+
+  it("clamps past the end of the file rather than padding", async () => {
+    const root = await makeTextRepo();
+    const snapshot = await buildLocalReview({ cwd: root, scope: "branch" });
+
+    expect(await readReviewFileLines(snapshot, "big.ts", "new", 59, 80)).toEqual([
+      "line 59",
+      "new",
+    ]);
+    expect(await readReviewFileLines(snapshot, "big.ts", "new", 999, 1000)).toEqual([]);
+  });
+
+  it("refuses files outside the diff, bad ranges, and oversized requests", async () => {
+    const root = await makeTextRepo();
+    const snapshot = await buildLocalReview({ cwd: root, scope: "branch" });
+
+    expect(await readReviewFileLines(snapshot, "missing.ts", "new", 1, 2)).toBeNull();
+    expect(await readReviewFileLines(snapshot, "../etc/passwd", "new", 1, 2)).toBeNull();
+    expect(await readReviewFileLines(snapshot, "big.ts", "new", 0, 2)).toBeNull();
+    expect(await readReviewFileLines(snapshot, "big.ts", "new", 5, 4)).toBeNull();
+    expect(
+      await readReviewFileLines(snapshot, "big.ts", "new", 1, MAX_CONTEXT_LINES + 1),
+    ).toBeNull();
   });
 });

@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { cn } from "@guided-review/ui";
 import {
   CodeContent,
+  CommentLineButton,
   DIFF_LINE_WRAP,
   highlightHunkLines,
   LineExtras,
@@ -44,11 +45,13 @@ export function UnifiedHunk({
               aria-current={isFocus ? "true" : undefined}
               className={cn(
                 DIFF_LINE_WRAP,
+                "group/line",
                 showDiffBg && line.type === "add" && "bg-diff-add-bg",
                 showDiffBg && line.type === "del" && "bg-diff-del-bg",
                 selectionClasses(id, selectedIds, focusId),
               )}
             >
+              <CommentLineButton lineId={id} />
               <span
                 className={lineNumberClasses(highlightNumber)}
                 data-testid={highlightNumber ? "diff-line-number-highlight" : undefined}

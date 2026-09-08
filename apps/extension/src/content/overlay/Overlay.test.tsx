@@ -262,6 +262,7 @@ describe("Overlay", () => {
         {
           id: "d1",
           filePath: "src/foo.ts",
+          scope: "line",
           side: "RIGHT",
           startLine: 1,
           endLine: 1,
@@ -300,6 +301,7 @@ describe("Overlay", () => {
         {
           id: "d1",
           filePath: "src/foo.ts",
+          scope: "line",
           side: "RIGHT",
           startLine: 1,
           endLine: 1,
@@ -340,6 +342,7 @@ describe("Overlay", () => {
         {
           id: "d1",
           filePath: "src/foo.ts",
+          scope: "line",
           side: "RIGHT",
           startLine: 1,
           endLine: 1,
@@ -1210,6 +1213,7 @@ describe("Overlay", () => {
           {
             id: "d1",
             filePath: "src/foo.ts",
+            scope: "line",
             side: "RIGHT",
             startLine: 1,
             endLine: 1,
@@ -1259,6 +1263,7 @@ describe("Overlay", () => {
           {
             id: "d1",
             filePath: "src/foo.ts",
+            scope: "line",
             side: "RIGHT",
             startLine: 3,
             endLine: 7,

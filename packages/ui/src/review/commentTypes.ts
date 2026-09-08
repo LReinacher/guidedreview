@@ -46,10 +46,17 @@ export interface LineSelection {
   focusIndex: number;
 }
 
-/** A locally saved draft comment (not yet posted to GitHub). */
-export interface DraftComment {
+interface DraftCommentBase {
   id: string;
   filePath: string;
+  body: string;
+  /** Review unit id active when the comment was saved, if any. */
+  unitId?: string;
+}
+
+/** A comment anchored to one line or an inclusive line range. */
+export interface DraftLineComment extends DraftCommentBase {
+  scope: "line";
   side: DiffSide;
   /** Inclusive display line numbers on `side` (file coordinates). */
   startLine: number;
@@ -58,9 +65,21 @@ export interface DraftComment {
   lineIds: string[];
   /** Selected source lines joined with newlines (captured at save time). */
   selectedCode: string;
-  body: string;
-  /** Review unit id active when the comment was saved, if any. */
-  unitId?: string;
+}
+
+/**
+ * A comment on the file as a whole. GitHub calls this `subject_type: "file"`;
+ * locally it is a note with no line range.
+ */
+export interface DraftFileComment extends DraftCommentBase {
+  scope: "file";
+}
+
+/** A locally saved draft comment (not yet posted to GitHub). */
+export type DraftComment = DraftLineComment | DraftFileComment;
+
+export function isLineComment(comment: DraftComment): comment is DraftLineComment {
+  return comment.scope === "line";
 }
 
 export type UiMode = "navigate" | "comment";
@@ -94,4 +113,11 @@ export function linesInSelection(lines: SelectableLine[], sel: LineSelection): S
 export function formatLineRangeLabel(filePath: string, startLine: number, endLine: number): string {
   if (startLine === endLine) return `${filePath}:L${startLine}`;
   return `${filePath}:L${startLine}–L${endLine}`;
+}
+
+/** Gutter/header label for a saved draft, whatever it is anchored to. */
+export function formatCommentTarget(comment: DraftComment): string {
+  return isLineComment(comment)
+    ? formatLineRangeLabel(comment.filePath, comment.startLine, comment.endLine)
+    : `${comment.filePath} (whole file)`;
 }

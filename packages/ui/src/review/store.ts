@@ -13,6 +13,7 @@ import {
   displayLineNumber,
   linesInSelection,
   type DraftComment,
+  type DraftLineComment,
   type LineSelection,
   type SelectableLine,
   type UiMode,
@@ -75,6 +76,19 @@ export function displayUnitCount(plan: ReviewPlan | null): number {
   return 1 + (plan?.units.length ?? 0);
 }
 
+/**
+ * A draft as it may actually be found in storage. Sessions written before
+ * whole-file comments existed carry no `scope`, and older ones no
+ * `selectedCode` — `normalizeStoredDraft` fills both in on restore.
+ */
+type StoredDraft = Partial<Omit<DraftLineComment, "scope">> & {
+  id: string;
+  filePath: string;
+  body: string;
+  unitId?: string;
+  scope?: DraftComment["scope"];
+};
+
 interface PersistedSession {
   diff: ParsedDiff;
   plan: ReviewPlan;
@@ -82,7 +96,25 @@ interface PersistedSession {
   /** Index into the display unit list (0 = PR description, then plan units). */
   currentUnitIndex: number;
   /** Local draft comments (session-scoped; not posted to GitHub). */
-  draftComments?: DraftComment[];
+  draftComments?: StoredDraft[];
+}
+
+/** Anything with (or missing) a line anchor restores as a line comment. */
+function normalizeStoredDraft(draft: StoredDraft): DraftComment {
+  const { id, filePath, body, unitId } = draft;
+  if (draft.scope === "file") return { scope: "file", id, filePath, body, unitId };
+  return {
+    scope: "line",
+    id,
+    filePath,
+    body,
+    unitId,
+    side: draft.side ?? "RIGHT",
+    startLine: draft.startLine ?? 0,
+    endLine: draft.endLine ?? 0,
+    lineIds: draft.lineIds ?? [],
+    selectedCode: draft.selectedCode ?? "",
+  };
 }
 
 const COMMENT_UI_RESET = {
@@ -90,6 +122,7 @@ const COMMENT_UI_RESET = {
   lineSelection: null as LineSelection | null,
   composerOpen: false,
   selectableLines: [] as SelectableLine[],
+  fileComposerPath: null as string | null,
 };
 
 interface ReviewState {
@@ -132,6 +165,8 @@ interface ReviewState {
   selectableLines: SelectableLine[];
   lineSelection: LineSelection | null;
   composerOpen: boolean;
+  /** Path of the file whose whole-file composer is open, if any. */
+  fileComposerPath: string | null;
   draftComments: DraftComment[];
 
   open: () => void;
@@ -167,6 +202,12 @@ interface ReviewState {
   setDiffViewMode: (mode: DiffViewMode) => void;
 
   enterCommentMode: (lines: SelectableLine[]) => void;
+  /**
+   * Comment on one clicked line: enter comment mode, put the cursor there and
+   * open the composer. `extend` (shift-click) grows the selection from the
+   * existing anchor instead of starting a new one.
+   */
+  startCommentAtLine: (lineId: string, extend?: boolean) => void;
   exitCommentMode: () => void;
   /**
    * Replace the selectable-line list (e.g. after split/unified toggle).
@@ -177,6 +218,9 @@ interface ReviewState {
   openComposer: () => void;
   closeComposer: () => void;
   saveDraftComment: (body: string, unitId?: string) => void;
+  openFileComposer: (filePath: string) => void;
+  closeFileComposer: () => void;
+  saveFileComment: (body: string, unitId?: string) => void;
   updateDraftComment: (id: string, body: string) => void;
   removeDraftComment: (id: string) => void;
   clearDraftComments: () => void;
@@ -216,6 +260,7 @@ export const useReviewStore = create<ReviewState>((set, get) => ({
   selectableLines: [],
   lineSelection: null,
   composerOpen: false,
+  fileComposerPath: null,
   draftComments: [],
 
   open: () => set({ isOpen: true }),
@@ -405,6 +450,31 @@ export const useReviewStore = create<ReviewState>((set, get) => ({
     });
   },
 
+  startCommentAtLine: (lineId, extend = false) => {
+    const { selectableLines, lineSelection, uiMode } = get();
+    const index = selectableLines.findIndex((line) => line.id === lineId);
+    if (index < 0) return;
+
+    // Shift-click extends from the live anchor, but only inside one file+side —
+    // the same rule linesInSelection applies when the comment is saved.
+    const anchor =
+      extend && uiMode === "comment" && lineSelection
+        ? selectableLines[lineSelection.anchorIndex]
+        : undefined;
+    const target = selectableLines[index];
+    const anchorIndex =
+      anchor && target && anchor.filePath === target.filePath && anchor.side === target.side
+        ? lineSelection!.anchorIndex
+        : index;
+
+    set({
+      uiMode: "comment",
+      lineSelection: { anchorIndex, focusIndex: index },
+      composerOpen: true,
+      fileComposerPath: null,
+    });
+  },
+
   exitCommentMode: () => set({ ...COMMENT_UI_RESET }),
 
   setSelectableLines: (lines) => {
@@ -503,6 +573,7 @@ export const useReviewStore = create<ReviewState>((set, get) => ({
 
     const draft: DraftComment = {
       id: newDraftId(),
+      scope: "line",
       filePath: first.filePath,
       side: first.side,
       startLine: Math.min(startNum, endNum),
@@ -517,6 +588,27 @@ export const useReviewStore = create<ReviewState>((set, get) => ({
       draftComments: [...draftComments, draft],
       composerOpen: false,
     });
+  },
+
+  openFileComposer: (filePath) => set({ fileComposerPath: filePath }),
+
+  closeFileComposer: () => set({ fileComposerPath: null }),
+
+  saveFileComment: (body, unitId) => {
+    const trimmed = body.trim();
+    if (!trimmed) return;
+    const { fileComposerPath, draftComments } = get();
+    if (!fileComposerPath) return;
+
+    const draft: DraftComment = {
+      id: newDraftId(),
+      scope: "file",
+      filePath: fileComposerPath,
+      body: trimmed,
+      unitId,
+    };
+
+    set({ draftComments: [...draftComments, draft], fileComposerPath: null });
   },
 
   updateDraftComment: (id, body) => {
@@ -646,10 +738,7 @@ export async function restoreSession(sessionKey: string): Promise<boolean> {
     error: null,
     buildPhase: null,
     providerLabel: null,
-    draftComments: (saved.draftComments ?? []).map((draft) => ({
-      ...draft,
-      selectedCode: draft.selectedCode ?? "",
-    })),
+    draftComments: (saved.draftComments ?? []).map(normalizeStoredDraft),
     ...COMMENT_UI_RESET,
   });
   return true;

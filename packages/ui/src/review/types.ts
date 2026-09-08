@@ -11,10 +11,13 @@ export type ReviewEvent = "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
 export interface ReviewCommentInput {
   path: string;
   body: string;
-  side: "LEFT" | "RIGHT";
-  line: number;
+  /** Omitted for a whole-file comment (`subjectType: "file"`). */
+  side?: "LEFT" | "RIGHT";
+  line?: number;
   startLine?: number;
   startSide?: "LEFT" | "RIGHT";
+  /** GitHub `subject_type`. Defaults to a line comment when absent. */
+  subjectType?: "file";
 }
 
 export type SubmitReviewResponse =

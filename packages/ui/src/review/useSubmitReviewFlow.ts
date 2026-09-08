@@ -2,12 +2,21 @@ import { useRef, useState } from "react";
 import type { ReviewCommentInput } from "@guided-review/ui/review/types";
 import type { ReviewContext } from "@guided-review/core";
 import { EMPTY_REVIEW_BODY_MESSAGE } from "@guided-review/ui/review/types";
-import type { DraftComment, ReviewEvent, ReviewSubmission } from "./commentTypes";
+import {
+  isLineComment,
+  type DraftComment,
+  type ReviewEvent,
+  type ReviewSubmission,
+} from "./commentTypes";
 import { useReviewHost } from "./host";
 
 /** Map local draft comments to GitHub create-review `comments[]` payloads. */
 function mapDraftsToReviewComments(drafts: DraftComment[]): ReviewCommentInput[] {
   return drafts.map((draft) => {
+    // A whole-file comment carries no line anchor; GitHub wants subject_type.
+    if (!isLineComment(draft)) {
+      return { path: draft.filePath, body: draft.body, subjectType: "file" };
+    }
     const comment: ReviewCommentInput = {
       path: draft.filePath,
       body: draft.body,

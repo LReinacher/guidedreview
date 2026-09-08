@@ -75,6 +75,10 @@ No key still walks one unit per file. **Structure With AI** asks for a key.
 
 The local UI has **Settings** (header, `⌘/Ctrl` + `,`, or **Connect AI Provider** when no key is set). Paste an API key, or turn on **Use My Subscription** to use Claude Code / Codex / Grok on this machine. A saved API key always wins. Save writes the [config file](#config-file) below. Flags and env still win for that run.
 
+## Collapsed lines
+
+Where a patch skips lines between two hunks, the diff shows a bar with the number of hidden lines. Click `↓` or `↑` to reveal 20 more from either end, or **Expand N Hidden Lines** when the rest fits in one step. The CLI reads them from the file on disk, so this only works for text files still present in the reviewed scope.
+
 ## Config file
 
 Saved prefs live at `~/.config/guided-review/config.json`, or:

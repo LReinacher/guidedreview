@@ -11,6 +11,7 @@ import {
   type ReviewStatus,
 } from "./store";
 import { buildSelectableLines } from "./buildSelectableLines";
+import { isLineComment } from "./commentTypes";
 import { restoreFocusAfterOverlay } from "./focusTrap";
 import { useOverlayKeyboard, type ViewChordPending } from "./useOverlayKeyboard";
 import { useSubmitReviewFlow } from "./useSubmitReviewFlow";
@@ -162,11 +163,15 @@ export function Overlay({
     const prompt = formatAgentPrompt(
       draftComments.map((draft) => ({
         filePath: draft.filePath,
-        startLine: draft.startLine,
-        endLine: draft.endLine,
         body: draft.body,
         unitId: draft.unitId,
-        selectedCode: draft.selectedCode,
+        ...(isLineComment(draft)
+          ? {
+              startLine: draft.startLine,
+              endLine: draft.endLine,
+              selectedCode: draft.selectedCode,
+            }
+          : {}),
       })),
     );
     if (!prompt) return;
@@ -313,9 +318,10 @@ export function Overlay({
     [resolvedFiles, diffViewMode],
   );
 
-  // Keep store selectable lines in sync while in comment mode (e.g. view toggle).
+  // Keep store selectable lines in sync with the unit and view mode. This runs
+  // in navigate mode too: clicking a line's + button enters comment mode from
+  // the store, so the list has to be current before comment mode starts.
   useEffect(() => {
-    if (uiMode !== "comment") return;
     useReviewStore.getState().setSelectableLines(selectableForUnit);
   }, [uiMode, selectableForUnit]);
 

@@ -1,8 +1,11 @@
 import type { ReviewNote } from "../types";
 
 function lineRangeLabel(note: ReviewNote): string {
-  if (note.startLine === note.endLine) return `L${note.startLine}`;
-  return `L${note.startLine}–L${note.endLine}`;
+  const { startLine, endLine } = note;
+  // No range means the note is about the file as a whole.
+  if (startLine === undefined || endLine === undefined) return "whole file";
+  if (startLine === endLine) return `L${startLine}`;
+  return `L${startLine}–L${endLine}`;
 }
 
 function formatNoteSection(note: ReviewNote): string {

@@ -5,8 +5,9 @@ import { ModEnterChord } from "./ShortcutKeys";
 
 interface CommentComposerProps {
   filePath: string;
-  startLine: number;
-  endLine: number;
+  /** Omit both for a whole-file comment. */
+  startLine?: number;
+  endLine?: number;
   onSave: (body: string) => void;
   onCancel: () => void;
 }
@@ -24,6 +25,7 @@ export function CommentComposer({
 }: CommentComposerProps) {
   const [body, setBody] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const isFileComment = startLine === undefined || endLine === undefined;
 
   useEffect(() => {
     textareaRef.current?.focus();
@@ -53,11 +55,17 @@ export function CommentComposer({
       aria-label="Draft review comment"
     >
       <div className="mb-2 font-mono text-sm text-muted">
-        {formatLineRangeLabel(filePath, startLine, endLine)}
+        {startLine === undefined || endLine === undefined
+          ? `${filePath} (whole file)`
+          : formatLineRangeLabel(filePath, startLine, endLine)}
       </div>
       <Textarea
         ref={textareaRef}
-        placeholder="Line comment (markdown supported)…"
+        placeholder={
+          isFileComment
+            ? "File comment (markdown supported)…"
+            : "Line comment (markdown supported)…"
+        }
         value={body}
         onChange={(e) => setBody(e.target.value)}
         onKeyDown={handleKeyDown}

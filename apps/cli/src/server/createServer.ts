@@ -35,7 +35,7 @@ import {
   type LocalCommit,
   type LocalReviewSnapshot,
 } from "../git/localDiff";
-import { isFilePreviewSide, readReviewImage } from "../git/fileBlob";
+import { isFilePreviewSide, readReviewFileLines, readReviewImage } from "../git/fileBlob";
 import { GitError } from "../git/run";
 import type { CliStatus } from "../banner";
 import { createLogger, labeled } from "../log";
@@ -352,6 +352,33 @@ export function createReviewServer(options: CreateReviewServerOptions) {
         "x-content-type-options": "nosniff",
       });
       res.end(blob.bytes);
+    } catch (error) {
+      const message = error instanceof GitError ? error.message : "Could not read that file.";
+      sendJson(res, 400, { error: message });
+    }
+  });
+
+  app.get("/api/file-lines", async (req, res) => {
+    const filePath = queryString(req.query.path);
+    const side = queryString(req.query.side);
+    const start = Number(queryString(req.query.start));
+    const end = Number(queryString(req.query.end));
+    if (
+      !filePath ||
+      !isFilePreviewSide(side) ||
+      !Number.isInteger(start) ||
+      !Number.isInteger(end)
+    ) {
+      sendJson(res, 400, { error: "path, side=old|new, start and end are required." });
+      return;
+    }
+    try {
+      const lines = await readReviewFileLines(snapshot, filePath, side, start, end);
+      if (!lines) {
+        sendJson(res, 404, { error: "No text available for that file." });
+        return;
+      }
+      sendJson(res, 200, { lines });
     } catch (error) {
       const message = error instanceof GitError ? error.message : "Could not read that file.";
       sendJson(res, 400, { error: message });

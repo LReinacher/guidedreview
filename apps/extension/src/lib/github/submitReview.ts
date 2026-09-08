@@ -138,6 +138,10 @@ async function fetchPullHeadSha(
 }
 
 function toApiComment(comment: ReviewCommentInput): Record<string, unknown> {
+  // A whole-file comment carries no anchor; GitHub rejects line/side with it.
+  if (comment.subjectType === "file") {
+    return { path: comment.path, body: comment.body, subject_type: "file" };
+  }
   const api: Record<string, unknown> = {
     path: comment.path,
     body: comment.body,

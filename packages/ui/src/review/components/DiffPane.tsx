@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { cn } from "@guided-review/ui";
+import { cn, confirm } from "@guided-review/ui";
 
 import { isImagePath, type ResolvedUnitFile } from "@guided-review/core";
 import { languageForPath } from "@guided-review/ui/review/highlight";
@@ -20,6 +20,8 @@ import {
   CommentModeChip,
   DiffViewToggle,
 } from "@guided-review/ui/review/components/diff/DiffToolbar";
+import { CommentComposer } from "@guided-review/ui/review/components/CommentComposer";
+import { DraftCommentCard } from "@guided-review/ui/review/components/DraftCommentCard";
 import { BinaryElidedEmptyState } from "@guided-review/ui/review/components/diff/BinaryElidedEmptyState";
 import { HunkGapPlaceholder } from "@guided-review/ui/review/components/diff/HunkGapPlaceholder";
 import { ImageDiff } from "@guided-review/ui/review/components/diff/ImageDiff";
@@ -88,10 +90,67 @@ interface DiffFileCardProps {
   selectedIds: Set<string>;
   focusId: string | null;
   draftsByEndLineId: Map<string, DraftComment[]>;
+  fileDrafts: DraftComment[];
   composerPlacementId: string | null;
   composerRange: ComposerRange;
   unitId?: string;
   searchHighlight: SearchScrollTarget | null;
+}
+
+/**
+ * Whole-file comments and the file composer, pinned under the path header so
+ * they read as belonging to the file rather than to any line in it.
+ */
+function FileCommentSection({
+  filePath,
+  drafts,
+  unitId,
+}: {
+  filePath: string;
+  drafts: DraftComment[];
+  unitId?: string;
+}) {
+  const fileComposerPath = useReviewStore((s) => s.fileComposerPath);
+  const closeFileComposer = useReviewStore((s) => s.closeFileComposer);
+  const saveFileComment = useReviewStore((s) => s.saveFileComment);
+  const removeDraftComment = useReviewStore((s) => s.removeDraftComment);
+  const updateDraftComment = useReviewStore((s) => s.updateDraftComment);
+  const composerOpen = fileComposerPath === filePath;
+
+  if (!composerOpen && drafts.length === 0) return null;
+
+  function requestRemoveDraft(id: string): void {
+    confirm({
+      title: "Remove Comment?",
+      body: "This comment will be removed. You can comment on this file again later.",
+      variant: "destructive",
+      okButtonText: "Remove",
+      cancelButtonText: "Cancel",
+      okButtonHandler: () => {
+        removeDraftComment(id);
+      },
+    });
+  }
+
+  return (
+    <div className="font-sans" data-testid={`file-comments-${filePath}`}>
+      {drafts.map((draft) => (
+        <DraftCommentCard
+          key={draft.id}
+          comment={draft}
+          onRemove={requestRemoveDraft}
+          onUpdate={updateDraftComment}
+        />
+      ))}
+      {composerOpen && (
+        <CommentComposer
+          filePath={filePath}
+          onSave={(body) => saveFileComment(body, unitId)}
+          onCancel={closeFileComposer}
+        />
+      )}
+    </div>
+  );
 }
 
 /** One file's path header + hunks (or binary empty state) inside the unit pane. */
@@ -101,11 +160,13 @@ function DiffFileCard({
   selectedIds,
   focusId,
   draftsByEndLineId,
+  fileDrafts,
   composerPlacementId,
   composerRange,
   unitId,
   searchHighlight,
 }: DiffFileCardProps) {
+  const openFileComposer = useReviewStore((s) => s.openFileComposer);
   const { file, hunks } = resolved;
   const language = languageForPath(file.path);
   const extension = file.path.includes(".") ? file.path.split(".").pop() : undefined;
@@ -139,7 +200,18 @@ function DiffFileCard({
             {extension ? `no syntax highlighting for .${extension}` : "no syntax highlighting"}
           </span>
         )}
+        <button
+          type="button"
+          className="shrink-0 cursor-pointer rounded px-1.5 py-0.5 font-sans text-sm text-muted hover:bg-surface-muted hover:text-foreground"
+          onClick={() => openFileComposer(file.path)}
+          aria-label={`Comment on ${file.path}`}
+          title="Comment on this file"
+          data-testid="comment-file-button"
+        >
+          Comment
+        </button>
       </div>
+      <FileCommentSection filePath={file.path} drafts={fileDrafts} unitId={unitId} />
       <div className="overflow-hidden rounded-b-lg">
         {imageFile ? (
           <ImageDiff file={file} viewMode={diffViewMode} />
@@ -148,13 +220,7 @@ function DiffFileCard({
         ) : (
           withHunkGaps(hunks).map((item) => {
             if (item.kind === "gap") {
-              return (
-                <HunkGapPlaceholder
-                  key={item.key}
-                  filePath={file.path}
-                  afterLine={item.afterLine}
-                />
-              );
+              return <HunkGapPlaceholder key={item.key} filePath={file.path} gap={item} />;
             }
             const { hunk } = item;
             return diffViewMode === "split" ? (
@@ -216,14 +282,20 @@ export function DiffPane({
 
   const filePaths = useMemo(() => new Set(files.map((f) => f.file.path)), [files]);
 
-  const { selectedIds, focusId, composerPlacementId, composerRange, draftsByEndLineId } =
-    deriveSelection(
-      uiMode === "comment" ? selectableLines : [],
-      uiMode === "comment" ? lineSelection : null,
-      composerOpen,
-      draftComments,
-      filePaths,
-    );
+  const {
+    selectedIds,
+    focusId,
+    composerPlacementId,
+    composerRange,
+    draftsByEndLineId,
+    fileDraftsByPath,
+  } = deriveSelection(
+    uiMode === "comment" ? selectableLines : [],
+    uiMode === "comment" ? lineSelection : null,
+    composerOpen,
+    draftComments,
+    filePaths,
+  );
 
   // Scroll the focused line into view when the cursor moves.
   useEffect(() => {
@@ -329,6 +401,7 @@ export function DiffPane({
           selectedIds={selectedIds}
           focusId={focusId}
           draftsByEndLineId={draftsByEndLineId}
+          fileDrafts={fileDraftsByPath.get(resolved.file.path) ?? []}
           composerPlacementId={composerPlacementId}
           composerRange={composerRange}
           unitId={unitId}

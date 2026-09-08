@@ -64,6 +64,15 @@ export interface FilePreviewRequest {
   context: ReviewContext;
 }
 
+export interface FileLinesRequest {
+  path: string;
+  side: FilePreviewSide;
+  /** 1-indexed, inclusive. */
+  startLine: number;
+  endLine: number;
+  context: ReviewContext;
+}
+
 export interface ReviewHost {
   kind: "github" | "local";
   /** Marketing demo controls. The underlying kind still drives the real host UI. */
@@ -89,6 +98,13 @@ export interface ReviewHost {
    * GitHub returns a `data:` URL (CSP + private repos); the CLI returns `/api/file`.
    */
   filePreviewUrl?(request: FilePreviewRequest): Promise<string | null>;
+  /**
+   * Source lines `[startLine, endLine]` (1-indexed, inclusive) from one side of
+   * a file. When a host implements this, the overlay expands the collapsed
+   * gaps between hunks in place; when it does not, the gap falls back to
+   * `fileLineUrl` (GitHub opens the file at that line instead).
+   */
+  fileLines?(request: FileLinesRequest): Promise<string[] | null>;
   submit?: ReviewHostSubmit;
   /**
    * Enables Generate Prompt. With submit it is a secondary action;

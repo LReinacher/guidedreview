@@ -68,6 +68,20 @@ export function createLocalReviewHost(options: { onConnectProvider: () => void }
       const params = new URLSearchParams({ path, side });
       return `/api/file?${params.toString()}`;
     },
+    // Present, so the overlay expands collapsed gaps in place rather than
+    // falling back to a link (there is nowhere to link to in a local review).
+    fileLines: async ({ path, side, startLine, endLine }) => {
+      const params = new URLSearchParams({
+        path,
+        side,
+        start: String(startLine),
+        end: String(endLine),
+      });
+      const res = await fetch(`/api/file-lines?${params.toString()}`);
+      if (!res.ok) return null;
+      const data = (await res.json()) as { lines?: string[] };
+      return data.lines ?? null;
+    },
     // Capability flag only — Overlay owns Generate Prompt UI + clipboard.
     exportNotes: () => {},
   };

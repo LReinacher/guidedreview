@@ -89,7 +89,15 @@ describe("withHunkGaps", () => {
     const b = hunk({ id: "f#1", newStart: 20, newLines: 2, oldStart: 18, oldLines: 2 });
     expect(withHunkGaps([a, b])).toEqual([
       { kind: "hunk", hunk: a },
-      { kind: "gap", afterLine: 4, key: "gap-f#0-f#1" },
+      {
+        kind: "gap",
+        key: "gap-f#0-f#1",
+        afterOldLine: 3,
+        afterNewLine: 4,
+        beforeOldLine: 18,
+        beforeNewLine: 20,
+        size: 15,
+      },
       { kind: "hunk", hunk: b },
     ]);
   });
@@ -108,6 +116,15 @@ describe("withHunkGaps", () => {
     const third = hunk({ id: "f#2", newStart: 40, newLines: 5, oldStart: 38, oldLines: 5 });
     const seq = withHunkGaps([first, third]);
     expect(seq).toHaveLength(3);
-    expect(seq[1]).toEqual({ kind: "gap", afterLine: 3, key: "gap-f#0-f#2" });
+    expect(seq[1]).toEqual({
+      kind: "gap",
+      key: "gap-f#0-f#2",
+      afterOldLine: 3,
+      afterNewLine: 3,
+      beforeOldLine: 38,
+      beforeNewLine: 40,
+      // 36 lines the patch never showed, expandable a chunk at a time.
+      size: 36,
+    });
   });
 });

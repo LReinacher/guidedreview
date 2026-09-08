@@ -21,8 +21,46 @@ export function hasLineGapBetween(prev: DiffHunk, next: DiffHunk): boolean {
   return false;
 }
 
-export type HunkSequenceItem =
-  { kind: "hunk"; hunk: DiffHunk } | { kind: "gap"; afterLine: number; key: string };
+/**
+ * A run of lines the patch omitted between two hunks. Carries both sides'
+ * anchors so the expander can label revealed context with old *and* new line
+ * numbers — a gap is unchanged text, so the two advance in lockstep.
+ */
+export interface HunkGap {
+  kind: "gap";
+  key: string;
+  /** Last line of the hunk above, per side. */
+  afterOldLine: number;
+  afterNewLine: number;
+  /** First line of the hunk below, per side. */
+  beforeOldLine: number;
+  beforeNewLine: number;
+  /** How many lines are hidden. */
+  size: number;
+}
+
+export type HunkSequenceItem = { kind: "hunk"; hunk: DiffHunk } | HunkGap;
+
+/** Last line of a hunk on one side; `start - 1` when the side is empty. */
+function endOf(start: number, count: number): number {
+  return count > 0 ? start + count - 1 : start - 1;
+}
+
+function gapBetween(prev: DiffHunk, next: DiffHunk): HunkGap | null {
+  const afterOldLine = endOf(prev.oldStart, prev.oldLines);
+  const afterNewLine = endOf(prev.newStart, prev.newLines);
+  const size = next.newStart - afterNewLine - 1;
+  if (size <= 0) return null;
+  return {
+    kind: "gap",
+    key: `gap-${prev.id}-${next.id}`,
+    afterOldLine,
+    afterNewLine,
+    beforeOldLine: next.oldStart,
+    beforeNewLine: next.newStart,
+    size,
+  };
+}
 
 /**
  * Interleave displayed hunks with gap markers for rendering.
@@ -35,14 +73,8 @@ export function withHunkGaps(hunks: DiffHunk[]): HunkSequenceItem[] {
     if (i > 0) {
       const prev = hunks[i - 1];
       if (hasLineGapBetween(prev, hunk)) {
-        const afterLine = hunkEndLine(prev);
-        if (afterLine != null) {
-          out.push({
-            kind: "gap",
-            afterLine,
-            key: `gap-${prev.id}-${hunk.id}`,
-          });
-        }
+        const gap = gapBetween(prev, hunk);
+        if (gap) out.push(gap);
       }
     }
     out.push({ kind: "hunk", hunk });
