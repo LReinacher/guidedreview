@@ -95,6 +95,7 @@ describe("claude CLI provider", () => {
     expect(args).toContain("--json-schema");
     expect(args).toContain("stream-json");
     expect(args[args.indexOf("--model") + 1]).toBe("claude-opus-4-8");
+    expect(args[args.indexOf("--effort") + 1]).toBe("high");
     // The diff goes over stdin, not argv — it is far too big for an argument.
     expect(captured.prompts[0]).toContain("src/a.ts#0");
   });

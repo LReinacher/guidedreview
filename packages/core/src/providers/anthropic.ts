@@ -1,6 +1,7 @@
 import type { ProviderSettings } from "../types";
 import { buildUserPrompt, SYSTEM_PROMPT } from "../review/buildPrompt";
 import { REVIEW_PLAN_JSON_SCHEMA } from "../review/reviewSchema";
+import { modelSupportsEffort, REVIEW_EFFORT } from "./catalog";
 import { postProviderJson } from "./http";
 import { readSseJsonStream } from "./sse";
 import type { AnnotateReviewInput, AnnotateStreamEvent, ProviderClient } from "./types";
@@ -43,7 +44,7 @@ export const anthropicProvider: ProviderClient = {
         stream: true,
         system: SYSTEM_PROMPT,
         output_config: {
-          effort: "medium",
+          ...(modelSupportsEffort(settings.model) ? { effort: REVIEW_EFFORT } : {}),
           format: { type: "json_schema", schema: REVIEW_PLAN_JSON_SCHEMA },
         },
         messages: [{ role: "user", content: buildUserPrompt(diff, context) }],

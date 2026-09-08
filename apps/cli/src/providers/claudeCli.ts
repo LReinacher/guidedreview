@@ -3,6 +3,7 @@ import { createInterface } from "node:readline";
 import {
   buildUserPrompt,
   ProviderError,
+  REVIEW_EFFORT,
   REVIEW_PLAN_JSON_SCHEMA,
   SYSTEM_PROMPT,
   type AnnotateStreamEvent,
@@ -27,12 +28,17 @@ const STDERR_LIMIT = 4000;
  * it authenticate. `--safe-mode` keeps the run reproducible: no CLAUDE.md,
  * hooks, plugins, MCP servers, or custom agents from whatever repo the user
  * happens to be in. Auth and model selection still work normally under it.
+ *
+ * Unlike the Messages API, Claude Code drops `--effort` for models without the
+ * knob rather than erroring, so it is safe to pass for every model.
  */
 function baseArgs(model: string): string[] {
   return [
     "--print",
     "--model",
     model,
+    "--effort",
+    REVIEW_EFFORT,
     "--safe-mode",
     "--strict-mcp-config",
     "--no-session-persistence",
