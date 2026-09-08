@@ -382,13 +382,12 @@ describe("createReviewServer", () => {
       const server = createReviewServer({
         snapshot,
         settings: {
-          provider: "anthropic",
-          model: "claude-sonnet-4-6",
-          apiKey: "sk-ant-oat01-live",
+          provider: "grok",
+          model: "grok-4.5",
+          apiKey: "session-jwt",
           authScheme: "bearer",
-          extraHeaders: { "anthropic-beta": "oauth-2025-04-20" },
         },
-        codingAgent: "claude-code",
+        codingAgent: "grok",
       });
       const port = await listen(server);
       const base = `http://127.0.0.1:${port}`;
@@ -396,9 +395,9 @@ describe("createReviewServer", () => {
       const saved = await fetch(`${base}/api/settings`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ provider: "anthropic", model: "claude-opus-4-8" }),
+        body: JSON.stringify({ provider: "grok", model: "grok-4.6" }),
       }).then((r) => r.json() as Promise<{ codingAgent: string | null; hasKey: boolean }>);
-      expect(saved.codingAgent).toBe("claude-code");
+      expect(saved.codingAgent).toBe("grok");
       expect(saved.hasKey).toBe(true);
 
       const file = JSON.parse(await readFile(path.join(dir, "config.json"), "utf8")) as {
@@ -408,7 +407,7 @@ describe("createReviewServer", () => {
       };
       expect(file.apiKey).toBeUndefined();
       expect(file.codingAgent).toBeUndefined();
-      expect(file.model).toBe("claude-opus-4-8");
+      expect(file.model).toBe("grok-4.6");
 
       await new Promise<void>((resolve, reject) =>
         server.close((err) => (err ? reject(err) : resolve())),
@@ -420,13 +419,12 @@ describe("createReviewServer", () => {
       const server = createReviewServer({
         snapshot,
         settings: {
-          provider: "anthropic",
-          model: "claude-sonnet-4-6",
-          apiKey: "sk-ant-oat01-live",
+          provider: "grok",
+          model: "grok-4.5",
+          apiKey: "session-jwt",
           authScheme: "bearer",
-          extraHeaders: { "anthropic-beta": "oauth-2025-04-20" },
         },
-        codingAgent: "claude-code",
+        codingAgent: "grok",
       });
       const port = await listen(server);
       const base = `http://127.0.0.1:${port}`;
@@ -562,8 +560,8 @@ describe("createReviewServer", () => {
             provider: "anthropic",
             auth: {
               provider: "anthropic",
-              secret: "sk-ant-oat01-live",
-              kind: "oauth",
+              secret: "",
+              kind: "cli",
               usableForReview: true,
             },
           },

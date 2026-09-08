@@ -10,7 +10,7 @@ const status = {
   provider: "grok",
   model: "grok-4.6",
   agent: "grok",
-  hasKey: true,
+  ready: true,
   lastPullAt: new Date(2026, 0, 2, 0, 40, 53),
   diffFresh: "up to date" as const,
 };
@@ -26,7 +26,7 @@ describe("formatBanner", () => {
     expect(text).toContain("branch");
     expect(text).toContain("grok/grok-4.6");
     expect(text).toContain("agent grok");
-    expect(text).toContain("key yes");
+    expect(text).toContain("auth ok");
     expect(text).toContain("last pull 00:40:53");
     expect(text).toContain("up to date");
     expect(text.split("\n")).toHaveLength(6);
@@ -37,6 +37,6 @@ describe("formatBanner", () => {
     expect(text).toContain("1 file · — · —");
     expect(text).toContain("last pull — · changed");
     expect(text).not.toContain("agent");
-    expect(text).not.toContain("key ");
+    expect(text).not.toContain("auth ");
   });
 });

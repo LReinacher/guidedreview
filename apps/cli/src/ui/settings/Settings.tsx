@@ -27,6 +27,8 @@ export interface PublicSettings {
   hasKey: boolean;
   last4: string | null;
   codingAgent: string | null;
+  /** Credentials are usable as-is — a saved key, or a self-authenticating agent. */
+  ready: boolean;
   configPath: string;
 }
 
@@ -93,7 +95,25 @@ function OptionRow({ icon, label }: { icon: ProviderId; label: string }) {
   );
 }
 
-function SubscriptionFields({ agent }: { agent: PublicAgent | undefined }) {
+/**
+ * Claude Code is run as a program (`claude -p`), so it signs its own requests.
+ * Codex and Grok instead lend us a token we send to the provider API, which is
+ * the fragile arrangement the warning is about.
+ */
+function subscriptionNote(provider: ProviderId): string {
+  if (provider === "anthropic") {
+    return "Guided Review runs `claude -p` on this machine, so Claude Code signs the request with whatever you are logged in as. Reviews count against that plan's limits, and this can break if Claude Code changes how print mode works.";
+  }
+  return "This is unofficial and can break when the agent rotates a token, logs out, or stores a session that the provider API will not accept (Codex ChatGPT logins do not work). A console API key is the better option if you want the same review tomorrow.";
+}
+
+function SubscriptionFields({
+  agent,
+  provider,
+}: {
+  agent: PublicAgent | undefined;
+  provider: ProviderId;
+}) {
   return (
     <div className="flex flex-col gap-4" data-testid="subscription-help">
       <p
@@ -101,11 +121,7 @@ function SubscriptionFields({ agent }: { agent: PublicAgent | undefined }) {
         className="m-0 flex items-start gap-2.5 rounded-md border px-3 py-2 text-sm leading-relaxed text-foreground border-[color-mix(in_srgb,var(--color-warning)_45%,var(--color-border))] bg-[color-mix(in_srgb,var(--color-warning)_12%,var(--color-background))]"
       >
         <WarningIcon className="text-warning" />
-        <span>
-          This is unofficial and can break when the agent rotates a token, logs out, or stores a
-          session that the provider API will not accept (Codex ChatGPT logins do not work). A
-          console API key is the better option if you want the same review tomorrow.
-        </span>
+        <span>{subscriptionNote(provider)}</span>
       </p>
       {agent && (
         <p
@@ -202,6 +218,7 @@ export function Settings({ onSaved, onDirtyChange }: SettingsProps) {
   const [model, setModel] = useState(defaultModelFor("anthropic"));
   const [apiKey, setApiKey] = useState("");
   const [hasKey, setHasKey] = useState(false);
+  const [ready, setReady] = useState(false);
   const [last4, setLast4] = useState<string | null>(null);
   const [useSubscription, setUseSubscription] = useState(false);
   const [configPath, setConfigPath] = useState("~/.config/guided-review/config.json");
@@ -228,6 +245,7 @@ export function Settings({ onSaved, onDirtyChange }: SettingsProps) {
         setProvider(data.provider);
         setModel(data.model);
         setHasKey(data.hasKey);
+        setReady(data.ready);
         setLast4(data.last4);
         setUseSubscription(Boolean(data.codingAgent));
         setConfigPath(data.configPath);
@@ -278,6 +296,7 @@ export function Settings({ onSaved, onDirtyChange }: SettingsProps) {
     setProvider(data.provider);
     setModel(data.model);
     setHasKey(data.hasKey);
+    setReady(data.ready);
     setLast4(data.last4);
     setUseSubscription(Boolean(data.codingAgent));
     setConfigPath(data.configPath);
@@ -381,7 +400,7 @@ export function Settings({ onSaved, onDirtyChange }: SettingsProps) {
   };
 
   const canTest = useSubscription
-    ? Boolean(subscriptionAgent?.usable || (hasKey && useSubscription))
+    ? Boolean(subscriptionAgent?.usable || ready)
     : Boolean(apiKey || (hasKey && last4));
 
   const subscriptionError =
@@ -485,8 +504,9 @@ export function Settings({ onSaved, onDirtyChange }: SettingsProps) {
                   Use My Subscription
                 </p>
                 <p id="use-subscription-hint" className="mt-1 m-0 text-sm text-muted">
-                  Read the current login from {agentName} on this machine. The token stays in that
-                  agent&apos;s store — Guided Review does not copy it into the config file.
+                  {provider === "anthropic"
+                    ? `Run ${agentName} on this machine to generate the review. It uses its own login — Guided Review never holds the credential.`
+                    : `Read the current login from ${agentName} on this machine. The token stays in that agent's store — Guided Review does not copy it into the config file.`}
                 </p>
               </div>
               <Toggle
@@ -506,7 +526,7 @@ export function Settings({ onSaved, onDirtyChange }: SettingsProps) {
             </div>
 
             {useSubscription ? (
-              <SubscriptionFields agent={subscriptionAgent} />
+              <SubscriptionFields agent={subscriptionAgent} provider={provider} />
             ) : (
               <ApiKeyField
                 apiKey={apiKey}

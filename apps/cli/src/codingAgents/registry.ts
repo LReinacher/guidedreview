@@ -1,5 +1,5 @@
-import type { ProviderSettings } from "@guided-review/core";
-import { normalizeProviderSettings } from "@guided-review/core";
+import type { ProviderClient, ProviderSettings } from "@guided-review/core";
+import { getProviderClient, normalizeProviderSettings } from "@guided-review/core";
 import { claudeCodeAdapter } from "./claudeCode";
 import { codexAdapter } from "./codex";
 import { grokAdapter } from "./grok";
@@ -26,6 +26,31 @@ export async function detectAll(io: AgentIo): Promise<DetectedAgent[]> {
     if (detected) found.push(detected);
   }
   return found;
+}
+
+/**
+ * True when the agent generates reviews by running its own binary. Those
+ * agents authenticate themselves, so Guided Review needs no key for them.
+ */
+export function agentRunsLocally(id: CodingAgentId | null | undefined): boolean {
+  return Boolean(id && adapterFor(id).reviewClient);
+}
+
+/** The client that should serve reviews for the current configuration. */
+export function reviewClientFor(
+  settings: ProviderSettings,
+  codingAgent: CodingAgentId | null | undefined,
+): ProviderClient {
+  const local = codingAgent ? adapterFor(codingAgent).reviewClient : undefined;
+  return local ?? getProviderClient(settings.provider);
+}
+
+/** Whether a review can be generated at all with the current configuration. */
+export function canGenerateReview(
+  settings: ProviderSettings,
+  codingAgent: CodingAgentId | null | undefined,
+): boolean {
+  return Boolean(settings.apiKey) || agentRunsLocally(codingAgent);
 }
 
 export function parseCodingAgentFlag(value: string | undefined): CodingAgentId | undefined {

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createMemoryIo } from "./io";
 import {
+  agentRunsLocally,
+  canGenerateReview,
   detectAll,
   formatUnusable,
   parseCodingAgentFlag,
@@ -125,21 +127,32 @@ describe("parseCodingAgentFlag / settingsFromAuth", () => {
 
   it("copies adapter auth onto ProviderSettings", () => {
     const settings = settingsFromAuth({
-      provider: "anthropic",
-      model: "claude-sonnet-4-6",
-      secret: "sk-ant-oat01-x",
+      provider: "grok",
+      model: "grok-4.6",
+      secret: "session-jwt",
       kind: "oauth",
       usableForReview: true,
       authScheme: "bearer",
-      extraHeaders: { "anthropic-beta": "oauth-2025-04-20" },
     });
     expect(settings).toMatchObject({
-      provider: "anthropic",
-      model: "claude-sonnet-4-6",
-      apiKey: "sk-ant-oat01-x",
+      provider: "grok",
+      model: "grok-4.6",
+      apiKey: "session-jwt",
       authScheme: "bearer",
-      extraHeaders: { "anthropic-beta": "oauth-2025-04-20" },
     });
+  });
+
+  it("reports which agents generate reviews by running locally", () => {
+    expect(agentRunsLocally("claude-code")).toBe(true);
+    expect(agentRunsLocally("grok")).toBe(false);
+    expect(agentRunsLocally(null)).toBe(false);
+  });
+
+  it("needs no API key when the agent runs locally", () => {
+    const settings = { provider: "anthropic" as const, model: "claude-opus-4-8", apiKey: "" };
+    expect(canGenerateReview(settings, "claude-code")).toBe(true);
+    expect(canGenerateReview(settings, "grok")).toBe(false);
+    expect(canGenerateReview({ ...settings, apiKey: "sk" }, null)).toBe(true);
   });
 
   it("keeps an agent model that is not in the catalog", () => {

@@ -74,15 +74,7 @@ describe("resolveSettings", () => {
 
   it("uses a single usable coding agent and persists the preference, not the secret", async () => {
     const dir = await withTempConfig();
-    const io = createMemoryIo({
-      home: "/home/test",
-      binaries: ["claude"],
-      files: {
-        "/home/test/.claude/.credentials.json": JSON.stringify({
-          claudeAiOauth: { accessToken: "sk-ant-oat01-live", expiresAt: Date.now() + 60_000 },
-        }),
-      },
-    });
+    const io = createMemoryIo({ home: "/home/test", binaries: ["claude"] });
     const resolved = await resolveSettings({
       io,
       persist: true,
@@ -90,8 +82,9 @@ describe("resolveSettings", () => {
       log: () => undefined,
     });
     expect(resolved.codingAgent).toBe("claude-code");
-    expect(resolved.settings.apiKey).toBe("sk-ant-oat01-live");
-    expect(resolved.settings.authScheme).toBe("bearer");
+    // Claude Code authenticates itself when we run `claude -p`.
+    expect(resolved.settings.apiKey).toBe("");
+    expect(publicSettings(resolved.settings, resolved.codingAgent).ready).toBe(true);
 
     const saved = JSON.parse(await readFile(path.join(dir, "config.json"), "utf8")) as {
       codingAgent?: string;
@@ -137,29 +130,28 @@ describe("resolveSettings", () => {
 });
 
 describe("applyProviderSettings", () => {
+  // Grok is the remaining agent that lends us a token to send to its API.
   const agentSettings = {
-    provider: "anthropic" as const,
-    model: "claude-sonnet-4-6",
-    apiKey: "sk-ant-oat01-live",
+    provider: "grok" as const,
+    model: "grok-4.5",
+    apiKey: "session-jwt",
     authScheme: "bearer" as const,
-    extraHeaders: { "anthropic-beta": "oauth-2025-04-20" },
   };
 
   it("keeps agent auth when no key is pasted", () => {
-    const next = applyProviderSettings(agentSettings, "claude-code", {
-      provider: "anthropic",
-      model: "claude-opus-4-8",
+    const next = applyProviderSettings(agentSettings, "grok", {
+      provider: "grok",
+      model: "grok-4.6",
     });
     expect(next.settings.authScheme).toBe("bearer");
-    expect(next.settings.extraHeaders).toEqual({ "anthropic-beta": "oauth-2025-04-20" });
-    expect(next.settings.apiKey).toBe("sk-ant-oat01-live");
-    expect(next.codingAgent).toBe("claude-code");
+    expect(next.settings.apiKey).toBe("session-jwt");
+    expect(next.codingAgent).toBe("grok");
     expect(next.persist.apiKey).toBeUndefined();
-    expect(next.persist.model).toBe("claude-opus-4-8");
+    expect(next.persist.model).toBe("grok-4.6");
   });
 
   it("drops agent auth when a console key is pasted", () => {
-    const next = applyProviderSettings(agentSettings, "claude-code", {
+    const next = applyProviderSettings(agentSettings, "grok", {
       provider: "openai",
       model: "gpt-4.1",
       apiKey: "sk-user",

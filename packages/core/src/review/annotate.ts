@@ -18,6 +18,12 @@ export interface AnnotateReviewInput {
   context: ReviewContext;
   settings: ProviderSettings;
   signal?: AbortSignal;
+  /**
+   * Transport override. Defaults to the HTTP client for `settings.provider`.
+   * The CLI passes its own client when a review runs through a local coding
+   * agent's binary instead of the provider API.
+   */
+  client?: ProviderClient;
 }
 
 /**
@@ -35,7 +41,7 @@ export async function* annotateReview(
     // "processing the diff" even when those steps take a while.
     yield { type: "STATUS", phase: "waiting_for_tokens" };
 
-    const client = getProviderClient(settings.provider);
+    const client = input.client ?? getProviderClient(settings.provider);
     const chunks = chunkDiffByFile(diff).filter((chunk) => chunk.files.length > 0);
     const allUnits: ReviewUnit[] = [];
     const seenHunkIds = new Set<string>();

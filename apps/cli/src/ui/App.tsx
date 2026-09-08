@@ -46,7 +46,7 @@ export function App() {
     label: string;
   } | null>(null);
   const cancelStreamRef = useRef<(() => void) | undefined>(undefined);
-  const hasKeyRef = useRef(false);
+  const readyRef = useRef(false);
   const providerIdRef = useRef<ProviderId>("anthropic");
   const codingAgentRef = useRef<string | null>(null);
 
@@ -61,14 +61,14 @@ export function App() {
   );
 
   const applyPublishedSettings = useCallback((published: PublicSettings) => {
-    hasKeyRef.current = published.hasKey;
+    readyRef.current = published.ready;
     providerIdRef.current = published.provider;
     codingAgentRef.current = published.codingAgent ?? null;
     setStructureWith({
       provider: published.provider,
       label: structureWithLabel(published.codingAgent, published.provider),
     });
-    if (published.hasKey) {
+    if (published.ready) {
       const agentLabel = codingAgentLabel(published.codingAgent);
       useReviewStore
         .getState()
@@ -100,7 +100,7 @@ export function App() {
   const startStructure = useCallback(() => {
     const { diff, prContext } = useReviewStore.getState();
     if (!diff || !prContext) return;
-    if (!hasKeyRef.current) {
+    if (!readyRef.current) {
       host.connectProvider();
       return;
     }

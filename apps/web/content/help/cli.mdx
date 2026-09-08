@@ -67,11 +67,13 @@ Resolution, in order:
 2. A key already saved in `~/.config/guided-review/config.json`
 3. A coding agent already on this machine (Claude Code, Codex, or Grok)
 
-If more than one agent has a usable key, the CLI asks which to use each run (Enter keeps the last choice). The chosen agent is shown in the browser UI. It reads the agent's own store at review time and does not copy the secret into Guided Review config.
+If more than one agent is usable, the CLI asks which to use each run (Enter keeps the last choice). The chosen agent is shown in the browser UI, and nothing it holds is copied into Guided Review config.
+
+Claude Code is used by running it: the CLI spawns `claude -p` and Claude Code authenticates with your existing login, so a Claude subscription works (it needs `claude` on your `PATH`). Codex and Grok instead lend a stored token to a direct provider API call, which is unofficial and can break — see [Configure AI provider → CLI](/docs/configure-provider#cli).
 
 No key still walks one unit per file. **Structure With AI** asks for a key.
 
-The local UI has **Settings** (header, `⌘/Ctrl` + `,`, or **Connect AI Provider** when no key is set). Paste an API key, or turn on **Use My Subscription** to borrow Claude Code / Codex / Grok on this machine. A saved API key always wins. Subscription is unofficial and can break — a console key is the better option. Save writes the [config file](#config-file) below. Flags and env still win for that run.
+The local UI has **Settings** (header, `⌘/Ctrl` + `,`, or **Connect AI Provider** when no key is set). Paste an API key, or turn on **Use My Subscription** to use Claude Code / Codex / Grok on this machine. A saved API key always wins. Save writes the [config file](#config-file) below. Flags and env still win for that run.
 
 ## Config file
 

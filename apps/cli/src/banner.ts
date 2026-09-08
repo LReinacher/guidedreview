@@ -11,7 +11,8 @@ export type CliStatus = {
   provider?: string;
   model?: string;
   agent?: string | null;
-  hasKey?: boolean;
+  /** Credentials are usable — an API key, or a local agent that self-authenticates. */
+  ready?: boolean;
   lastPullAt?: Date | null;
   diffFresh?: DiffFreshness;
 };
@@ -34,8 +35,8 @@ function filesLine(status: CliStatus): string {
 function modelLine(status: CliStatus): string {
   const model = status.provider && status.model ? `${status.provider}/${status.model}` : "—";
   const agent = status.agent ? ` · agent ${status.agent}` : "";
-  const key = status.hasKey === undefined ? "" : ` · key ${status.hasKey ? "yes" : "no"}`;
-  return `${model}${agent}${key}`;
+  const auth = status.ready === undefined ? "" : ` · auth ${status.ready ? "ok" : "none"}`;
+  return `${model}${agent}${auth}`;
 }
 
 function pullLine(status: CliStatus): string {

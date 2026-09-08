@@ -106,6 +106,6 @@ Review a local branch, commit, or working tree. Opens a browser UI.
   --no-untracked     Skip untracked files
   --provider <id>    anthropic | openai | grok
   --model <id>       Provider model id
-  --agent <id>       claude-code | codex | grok (reuse that coding agent's key)
+  --agent <id>       claude-code | codex | grok (use that coding agent's login)
   -h, --help         Show this help
 `;

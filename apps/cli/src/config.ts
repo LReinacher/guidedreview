@@ -9,6 +9,7 @@ import {
 } from "@guided-review/core";
 import {
   CODING_AGENTS,
+  canGenerateReview,
   createDefaultAgentIo,
   detectAll,
   parseCodingAgentFlag,
@@ -44,6 +45,11 @@ export interface PublicCliSettings {
   hasKey: boolean;
   last4: string | null;
   codingAgent: CodingAgentId | null;
+  /**
+   * A review can be generated right now. True without a key when the selected
+   * coding agent runs locally and authenticates itself (Claude Code).
+   */
+  ready: boolean;
   configPath: string;
 }
 
@@ -229,6 +235,7 @@ export function publicSettings(
     hasKey: Boolean(key),
     last4: key ? key.slice(-4) : null,
     codingAgent: codingAgent ?? null,
+    ready: canGenerateReview(settings, codingAgent),
     configPath: configPath(),
   };
 }

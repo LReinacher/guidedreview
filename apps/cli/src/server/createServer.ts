@@ -6,7 +6,6 @@ import express, { type NextFunction, type Request, type Response } from "express
 import {
   annotateReview,
   describeErrorMessage,
-  getProviderClient,
   type AnnotateReviewStreamEvent,
   type ProviderSettings,
 } from "@guided-review/core";
@@ -19,9 +18,11 @@ import {
   type PublicCliSettings,
 } from "../config";
 import {
+  canGenerateReview,
   createDefaultAgentIo,
   detectAll,
   isCodingAgentId,
+  reviewClientFor,
   type CodingAgentId,
   type DetectedAgent,
 } from "../codingAgents";
@@ -128,7 +129,7 @@ function sessionStatus(
     provider: published.provider,
     model: published.model,
     agent: published.codingAgent ?? null,
-    hasKey: published.hasKey,
+    ready: published.ready,
   };
 }
 
@@ -170,7 +171,7 @@ export function createReviewServer(options: CreateReviewServerOptions) {
   const detectAgents = options.detectAgents ?? (() => detectAll(createDefaultAgentIo()));
   const testConnection =
     options.testConnection ??
-    ((next: ProviderSettings) => getProviderClient(next.provider).testConnection(next));
+    ((next: ProviderSettings) => reviewClientFor(next, codingAgent).testConnection(next));
   const staticDir =
     options.staticDir ?? path.join(path.dirname(fileURLToPath(import.meta.url)), "ui");
 
@@ -289,7 +290,7 @@ export function createReviewServer(options: CreateReviewServerOptions) {
       provider: published.provider,
       model: published.model,
       agent: published.codingAgent ?? null,
-      hasKey: published.hasKey,
+      ready: published.ready,
     });
     sendJson(res, 200, published);
   });
@@ -310,7 +311,7 @@ export function createReviewServer(options: CreateReviewServerOptions) {
       sendJson(res, 400, { error: applied.error });
       return;
     }
-    if (!settings.apiKey) {
+    if (!canGenerateReview(settings, codingAgent)) {
       sendJson(res, 200, { ok: false, error: "No API key configured." });
       return;
     }
@@ -409,7 +410,7 @@ export function createReviewServer(options: CreateReviewServerOptions) {
       if (!planFinished) planLog.warn("client closed");
     });
 
-    if (!settings.apiKey) {
+    if (!canGenerateReview(settings, codingAgent)) {
       planLog.warn("no API key");
       res.write(
         `data: ${JSON.stringify({
@@ -430,6 +431,7 @@ export function createReviewServer(options: CreateReviewServerOptions) {
       diff: snapshot.diff,
       context: snapshot.context,
       settings,
+      client: reviewClientFor(settings, codingAgent),
       signal: abort.signal,
     })) {
       if (abort.signal.aborted) return;
