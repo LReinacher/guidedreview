@@ -1,6 +1,6 @@
 /**
  * Local draft review-comment types for the overlay.
- * Shared submit-API shapes (`ReviewEvent`, `ReviewCommentInput`) live in `src/lib/types.ts`.
+ * Shared submit-API shapes (`ReviewEvent`, `ReviewCommentInput`) live in the engine.
  */
 
 import type { DiffLine, ReviewEvent } from "@guided-review/ui/review/types";
@@ -46,12 +46,20 @@ export interface LineSelection {
   focusIndex: number;
 }
 
+/**
+ * Where a saved comment is headed. `github` comments are posted as inline
+ * review comments when the review is submitted; `local` ones never leave the
+ * machine and only feed the coding-agent prompt.
+ */
+export type CommentTarget = "github" | "local";
+
 interface DraftCommentBase {
   id: string;
   filePath: string;
   body: string;
   /** Review unit id active when the comment was saved, if any. */
   unitId?: string;
+  target: CommentTarget;
 }
 
 /** A comment anchored to one line or an inclusive line range. */
@@ -80,6 +88,11 @@ export type DraftComment = DraftLineComment | DraftFileComment;
 
 export function isLineComment(comment: DraftComment): comment is DraftLineComment {
   return comment.scope === "line";
+}
+
+/** Comments that would be posted to GitHub on submit. */
+export function githubComments(comments: DraftComment[]): DraftComment[] {
+  return comments.filter((comment) => comment.target === "github");
 }
 
 export type UiMode = "navigate" | "comment";
@@ -116,7 +129,7 @@ export function formatLineRangeLabel(filePath: string, startLine: number, endLin
 }
 
 /** Gutter/header label for a saved draft, whatever it is anchored to. */
-export function formatCommentTarget(comment: DraftComment): string {
+export function formatCommentAnchor(comment: DraftComment): string {
   return isLineComment(comment)
     ? formatLineRangeLabel(comment.filePath, comment.startLine, comment.endLine)
     : `${comment.filePath} (whole file)`;

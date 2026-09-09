@@ -140,7 +140,7 @@ Also available: `pnpm typecheck`, `pnpm lint`, `pnpm format`. Workspace-scoped r
 
 Docs: [Your first review](https://guidedreview.dev/docs/first-review) · [Keyboard shortcuts](https://guidedreview.dev/docs/keyboard-shortcuts) · [Submit a review](https://guidedreview.dev/docs/submit-review).
 
-**On local changes** — run the CLI in a git repo, pick the scope (branch vs base, uncommitted, unstaged, or a commit), then use **Structure With AI** when you want related files grouped into review units with short context. Line notes stay in the running session; there is no GitHub submit. **Generate Prompt** builds a coding-agent prompt from those notes and copies it — Guided Review does not send it anywhere.
+**On local changes** — run the CLI in a git repo, pick the scope (branch vs base, uncommitted, unstaged, or a commit), then use **Structure With AI** when you want related files grouped into review units with short context. The review is saved in the repo's git dir, so restarting picks it back up with its structure and comments intact. If the branch has an open pull request, **Submit Review** posts your comments there using this machine's `gh` credentials; **Generate Prompt** builds a coding-agent prompt from them instead — Guided Review does not send that anywhere.
 
 Docs: [CLI](https://guidedreview.dev/docs/cli).
 

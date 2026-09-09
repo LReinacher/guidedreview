@@ -9,13 +9,27 @@ import {
   type RefObject,
 } from "react";
 import type { ReviewEvent, ReviewSubmission } from "@guided-review/ui/review/commentTypes";
-import { Button, CloseButton, Kbd, KbdGroup, ModalShell, Textarea } from "@guided-review/ui";
+import {
+  Button,
+  Callout,
+  CloseButton,
+  Kbd,
+  KbdGroup,
+  ModalShell,
+  Textarea,
+} from "@guided-review/ui";
 import { ModEnterChord } from "./ShortcutKeys";
 
 interface SubmitReviewModalProps {
   preview?: boolean;
   open: boolean;
   onClose: () => void;
+  /** Pull request the review posts to, e.g. `acme/widget#42`. */
+  targetLabel?: string | null;
+  /** Inline comments that will be posted alongside the summary. */
+  commentCount?: number;
+  /** Caution about this submission (diff does not match the PR head, …). */
+  warning?: string | null;
   onSubmit: (submission: ReviewSubmission) => void;
   /** True while the GitHub API request is in flight. */
   submitting?: boolean;
@@ -176,6 +190,9 @@ interface ComposeReviewStepProps {
   selectedLabel: string;
   selectedDescription: string;
   selectedEvent: ReviewEvent;
+  targetLabel: string | null;
+  commentCount: number;
+  warning: string | null;
   error: string | null;
   submitting: boolean;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
@@ -192,6 +209,9 @@ function ComposeReviewStep({
   selectedLabel,
   selectedDescription,
   selectedEvent,
+  targetLabel,
+  commentCount,
+  warning,
   error,
   submitting,
   textareaRef,
@@ -223,6 +243,15 @@ function ComposeReviewStep({
           <div className="text-base font-semibold text-foreground">{selectedLabel}</div>
           <div className="mt-0.5 text-sm leading-snug text-muted">{selectedDescription}</div>
         </div>
+
+        <p className="m-0 text-sm text-muted" data-testid="submit-review-target">
+          {commentCount} inline comment{commentCount === 1 ? "" : "s"}
+          {targetLabel ? ` → ${targetLabel}` : ""}
+        </p>
+
+        {warning ? (
+          <Callout kind="warn" message={warning} data-testid="submit-review-warning" />
+        ) : null}
 
         {error ? (
           <p
@@ -280,6 +309,9 @@ export function SubmitReviewModal({
   open,
   onClose,
   onSubmit,
+  targetLabel = null,
+  commentCount = 0,
+  warning = null,
   submitting = false,
   error = null,
   submitActionRef,
@@ -450,6 +482,9 @@ export function SubmitReviewModal({
           selectedLabel={selectedOpt.label}
           selectedDescription={selectedOpt.description}
           selectedEvent={selectedOpt.value}
+          targetLabel={targetLabel}
+          commentCount={commentCount}
+          warning={preview ? null : warning}
           error={error}
           submitting={submitting}
           textareaRef={textareaRef}

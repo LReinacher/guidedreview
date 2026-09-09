@@ -115,6 +115,7 @@ function FileCommentSection({
   const saveFileComment = useReviewStore((s) => s.saveFileComment);
   const removeDraftComment = useReviewStore((s) => s.removeDraftComment);
   const updateDraftComment = useReviewStore((s) => s.updateDraftComment);
+  const setDraftCommentTarget = useReviewStore((s) => s.setDraftCommentTarget);
   const composerOpen = fileComposerPath === filePath;
 
   if (!composerOpen && drafts.length === 0) return null;
@@ -140,12 +141,13 @@ function FileCommentSection({
           comment={draft}
           onRemove={requestRemoveDraft}
           onUpdate={updateDraftComment}
+          onTargetChange={setDraftCommentTarget}
         />
       ))}
       {composerOpen && (
         <CommentComposer
           filePath={filePath}
-          onSave={(body) => saveFileComment(body, unitId)}
+          onSave={(body, target) => saveFileComment(body, unitId, target)}
           onCancel={closeFileComposer}
         />
       )}

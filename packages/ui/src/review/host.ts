@@ -13,6 +13,7 @@ import {
 } from "react";
 import type {
   ParsedDiff,
+  PRIdentity,
   ReviewContext,
   ReviewErrorInfo,
   ReviewPlan,
@@ -36,11 +37,30 @@ export interface ReviewSubmitAuth {
   name?: string;
 }
 
+/** The pull request a review would be posted to, resolved at submit time. */
+export interface ReviewSubmitTarget {
+  pr: PRIdentity;
+  /** Human label for the dialog, e.g. `acme/widget#42`. */
+  label?: string;
+  /**
+   * Non-blocking caution about this submission — typically that the reviewed
+   * diff does not match the PR head, so inline comments may not line up.
+   */
+  warning?: string | null;
+}
+
 export interface ReviewHostSubmit {
   ConnectionDialog?: ComponentType<ReviewConnectionProps>;
   getAuthStatus(): Promise<{ ok: true; auth: ReviewSubmitAuth | null }>;
+  /**
+   * Which PR to post to. The GitHub host reads it off the page context it is
+   * already running on; the CLI has to ask its server which PR the checked-out
+   * branch belongs to. Hosts that omit this fall back to the PR identity in
+   * `ReviewContext`.
+   */
+  resolveTarget?(context: ReviewContext | null): Promise<ReviewSubmitTarget | null>;
   submitReview(
-    pr: { owner: string; repo: string; number: number },
+    pr: PRIdentity,
     body: string,
     event: ReviewEvent,
     comments: ReviewCommentInput[],
@@ -83,6 +103,13 @@ export interface ReviewHost {
   assetUrl(path: string): string;
   persistSession(key: string, data: unknown): Promise<void>;
   restoreSession(key: string): Promise<unknown | null>;
+  /**
+   * Persist sessions that have not been AI-structured yet. Hosts whose storage
+   * is durable (the CLI writes into the git dir) turn this on so a crash never
+   * costs the user their comments; the extension keeps only AI plans, which is
+   * all a browser session needs to avoid a repeat provider call.
+   */
+  persistPartialSessions?: boolean;
   streamPlan(
     diff: ParsedDiff,
     context: ReviewContext,
@@ -130,9 +157,18 @@ export function ReviewHostProvider({ host, children }: { host: ReviewHost; child
   return createElement(ReviewHostContext.Provider, { value: host }, children);
 }
 
-export function useReviewHost(): ReviewHost {
+/**
+ * The host if one is set, else null. For leaf components that only vary a
+ * detail on a host capability (can this review be posted to GitHub?) and must
+ * still render standalone.
+ */
+export function useOptionalReviewHost(): ReviewHost | null {
   const fromContext = useContext(ReviewHostContext);
-  const host = fromContext ?? activeHost;
+  return fromContext ?? activeHost;
+}
+
+export function useReviewHost(): ReviewHost {
+  const host = useOptionalReviewHost();
   if (!host) {
     throw new Error("ReviewHost is not set. Wrap the overlay in ReviewHostProvider.");
   }

@@ -6,8 +6,11 @@ import express, { type NextFunction, type Request, type Response } from "express
 import {
   annotateReview,
   describeErrorMessage,
+  submitPullRequestReview,
   type AnnotateReviewStreamEvent,
   type ProviderSettings,
+  type ReviewCommentInput,
+  type ReviewEvent,
 } from "@guided-review/core";
 import {
   applyDetectedAgent,
@@ -37,6 +40,18 @@ import {
 } from "../git/localDiff";
 import { isFilePreviewSide, readReviewFileLines, readReviewImage } from "../git/fileBlob";
 import { GitError } from "../git/run";
+import {
+  resolveGitHubToken as resolveGitHubTokenFromMachine,
+  type GitHubPullRequest,
+  type GitHubToken,
+} from "../github/gh";
+import {
+  commentAlignmentWarning,
+  readGitHubTarget as readGitHubTargetForRepo,
+  GH_RECONNECT_HINT,
+  type GitHubTargetStatus,
+} from "../github/reviewTarget";
+import { readReviewSession, writeReviewSession } from "../review/sessionStore";
 import type { CliStatus } from "../banner";
 import { createLogger, labeled } from "../log";
 import type { Logger } from "winston";
@@ -60,6 +75,20 @@ function describePlanEvent(event: AnnotateReviewStreamEvent): string | null {
   }
 }
 
+/** What the browser needs to decide whether Submit Review is on the table. */
+export interface GitHubStatusPayload {
+  /** False when the CLI was started with --no-github. */
+  enabled: boolean;
+  /** A PR exists and the token works — Submit Review can be offered. */
+  available: boolean;
+  pullRequest: GitHubPullRequest | null;
+  login: string | null;
+  /** Why submitting is unavailable, in the user's terms. */
+  reason: string | null;
+  /** Non-blocking caution about comment placement for the current scope. */
+  warning: string | null;
+}
+
 export interface ReviewSessionPayload {
   context: LocalReviewSnapshot["context"];
   diff: LocalReviewSnapshot["diff"];
@@ -75,11 +104,17 @@ export interface CreateReviewServerOptions {
   snapshot: LocalReviewSnapshot;
   settings: ProviderSettings;
   codingAgent?: CodingAgentId | null;
+  /** Offer posting the review to the branch's pull request. Default true. */
+  github?: boolean;
   staticDir?: string;
   logger?: Logger;
   onStatus?: (patch: Partial<CliStatus>) => void;
   detectAgents?: () => Promise<DetectedAgent[]>;
   testConnection?: (settings: ProviderSettings) => Promise<void>;
+  /** Test seam for the `gh` lookups behind Submit Review. */
+  readGitHubTarget?: (repoRoot: string) => Promise<GitHubTargetStatus>;
+  /** Test seam for the credentials Submit Review posts with. */
+  resolveGitHubToken?: (repoRoot: string) => Promise<GitHubToken | null>;
 }
 
 interface SettingsBody {
@@ -139,6 +174,50 @@ function queryString(value: unknown): string {
   return "";
 }
 
+const REVIEW_EVENTS: ReviewEvent[] = ["COMMENT", "APPROVE", "REQUEST_CHANGES"];
+
+interface SubmitReviewBody {
+  body: string;
+  event: ReviewEvent;
+  comments: ReviewCommentInput[];
+}
+
+/**
+ * Comments arrive from the local UI, but they are forwarded verbatim to
+ * GitHub, so only the fields the API accepts are copied through.
+ */
+function parseReviewComment(value: unknown): ReviewCommentInput | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.path !== "string" || !raw.path) return null;
+  if (typeof raw.body !== "string" || !raw.body) return null;
+  const comment: ReviewCommentInput = { path: raw.path, body: raw.body };
+  if (raw.subjectType === "file") {
+    comment.subjectType = "file";
+    return comment;
+  }
+  if (raw.side === "LEFT" || raw.side === "RIGHT") comment.side = raw.side;
+  if (typeof raw.line === "number") comment.line = raw.line;
+  if (typeof raw.startLine === "number") comment.startLine = raw.startLine;
+  if (raw.startSide === "LEFT" || raw.startSide === "RIGHT") comment.startSide = raw.startSide;
+  return comment;
+}
+
+function parseSubmitReviewBody(value: unknown): SubmitReviewBody | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const event = raw.event;
+  if (typeof event !== "string" || !REVIEW_EVENTS.includes(event as ReviewEvent)) return null;
+  if (typeof raw.body !== "string") return null;
+  const comments = Array.isArray(raw.comments) ? raw.comments.map(parseReviewComment) : [];
+  if (comments.some((comment) => comment === null)) return null;
+  return {
+    body: raw.body,
+    event: event as ReviewEvent,
+    comments: comments as ReviewCommentInput[],
+  };
+}
+
 function parseSettingsBody(value: unknown): SettingsBody | null {
   if (!value || typeof value !== "object") return null;
   const raw = value as Record<string, unknown>;
@@ -174,6 +253,44 @@ export function createReviewServer(options: CreateReviewServerOptions) {
     ((next: ProviderSettings) => reviewClientFor(next, codingAgent).testConnection(next));
   const staticDir =
     options.staticDir ?? path.join(path.dirname(fileURLToPath(import.meta.url)), "ui");
+  const githubEnabled = options.github !== false;
+  const readGitHubTarget = options.readGitHubTarget ?? readGitHubTargetForRepo;
+  const resolveGitHubToken = options.resolveGitHubToken ?? resolveGitHubTokenFromMachine;
+  const githubLog = labeled(logger, "github");
+  const stateLog = labeled(logger, "state");
+  /**
+   * PR + token identity. Costs a `gh` call and an API round trip, so a working
+   * answer is kept for the life of the review — but a failure is not, or
+   * running `gh auth login` in another terminal could never take effect.
+   */
+  let githubTarget: GitHubTargetStatus | null = null;
+
+  async function githubStatus(): Promise<GitHubStatusPayload> {
+    if (!githubEnabled) {
+      return {
+        enabled: false,
+        available: false,
+        pullRequest: null,
+        login: null,
+        reason: "GitHub submission is off (--no-github).",
+        warning: null,
+      };
+    }
+    const target = githubTarget ?? (await readGitHubTarget(snapshot.repo.repoRoot));
+    const available = Boolean(target.pullRequest && target.auth);
+    if (available) githubTarget = target;
+    return {
+      enabled: true,
+      available,
+      pullRequest: target.pullRequest,
+      login: target.auth?.login ?? null,
+      reason: target.reason,
+      warning:
+        available && target.pullRequest
+          ? await commentAlignmentWarning(snapshot, target.pullRequest)
+          : null,
+    };
+  }
 
   async function applySettingsBody(
     body: SettingsBody,
@@ -211,6 +328,9 @@ export function createReviewServer(options: CreateReviewServerOptions) {
   app.disable("x-powered-by");
   app.use(
     express.json({
+      // A persisted review carries its whole diff and plan, which routinely
+      // beats the 100kb default. This server only ever listens on loopback.
+      limit: "64mb",
       verify: (req, _res, buf) => {
         (req as RequestWithRaw).rawBody = buf;
       },
@@ -417,6 +537,121 @@ export function createReviewServer(options: CreateReviewServerOptions) {
       sendJson(res, 400, { error: message });
     }
   });
+
+  app.get("/api/github", async (_req, res) => {
+    try {
+      sendJson(res, 200, await githubStatus());
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not reach GitHub.";
+      githubLog.warn(message);
+      sendJson(res, 200, {
+        enabled: githubEnabled,
+        available: false,
+        pullRequest: null,
+        login: null,
+        reason: message,
+        warning: null,
+      } satisfies GitHubStatusPayload);
+    }
+  });
+
+  app.post("/api/github/review", async (req, res) => {
+    const parsed = readJsonBody(req);
+    if (!parsed.ok) {
+      sendJson(res, 400, { ok: false, error: "Request body must be JSON." });
+      return;
+    }
+    const body = parseSubmitReviewBody(parsed.value);
+    if (!body) {
+      sendJson(res, 400, {
+        ok: false,
+        code: "validation",
+        error: "Provide a review body, an event, and comments.",
+      });
+      return;
+    }
+
+    const status = await githubStatus();
+    if (!status.available || !status.pullRequest) {
+      sendJson(res, 200, {
+        ok: false,
+        code: "not_authenticated",
+        error: status.reason ?? "GitHub submission is unavailable.",
+      });
+      return;
+    }
+
+    const credentials = await resolveGitHubToken(snapshot.repo.repoRoot);
+    if (!credentials) {
+      sendJson(res, 200, {
+        ok: false,
+        code: "not_authenticated",
+        error: `No GitHub credentials. ${GH_RECONNECT_HINT}`,
+      });
+      return;
+    }
+
+    const pr = status.pullRequest;
+    const result = await submitPullRequestReview({
+      accessToken: credentials.token,
+      pr: { owner: pr.owner, repo: pr.repo, number: pr.number },
+      body: body.body,
+      event: body.event,
+      comments: body.comments,
+      reconnectHint: GH_RECONNECT_HINT,
+    });
+    if (result.ok) {
+      githubLog.info(`submitted ${body.event} to ${pr.owner}/${pr.repo}#${pr.number}`);
+    } else {
+      githubLog.warn(`submit failed  ${result.error}`);
+    }
+    sendJson(res, 200, result);
+  });
+
+  app.get("/api/review-state", async (req, res) => {
+    const key = queryString(req.query.key);
+    if (!key) {
+      sendJson(res, 400, { error: "key is required." });
+      return;
+    }
+    try {
+      sendJson(res, 200, { state: await readReviewSession(snapshot.repo.gitDir, key) });
+    } catch (error) {
+      stateLog.warn(error instanceof Error ? error.message : String(error));
+      sendJson(res, 200, { state: null });
+    }
+  });
+
+  const saveReviewState = async (req: Request, res: Response): Promise<void> => {
+    const parsed = readJsonBody(req);
+    if (!parsed.ok || !parsed.value || typeof parsed.value !== "object") {
+      sendJson(res, 400, { error: "Request body must be JSON." });
+      return;
+    }
+    const { key, state } = parsed.value as { key?: unknown; state?: unknown };
+    if (typeof key !== "string" || !key || key.length > 200) {
+      sendJson(res, 400, { error: "key is required." });
+      return;
+    }
+    // Reject rather than storing an empty review: a caller that omits `state`
+    // is broken, and silently persisting null would look like a working save.
+    if (state === undefined) {
+      sendJson(res, 400, { error: "state is required." });
+      return;
+    }
+    try {
+      await writeReviewSession(snapshot.repo.gitDir, key, state);
+      sendJson(res, 200, { ok: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not save the review.";
+      stateLog.warn(message);
+      sendJson(res, 500, { error: message });
+    }
+  };
+
+  app.put("/api/review-state", saveReviewState);
+  // Same handler under POST: the unload-time flush cannot use PUT everywhere.
+  app.post("/api/review-state", saveReviewState);
 
   app.get("/api/plan", async (req, res) => {
     res.status(200);

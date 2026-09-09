@@ -52,6 +52,7 @@ async function main(): Promise<void> {
     snapshot: local,
     settings,
     codingAgent,
+    github: args.github,
     staticDir,
     logger,
     onStatus: (patch) => display.setStatus(patch),

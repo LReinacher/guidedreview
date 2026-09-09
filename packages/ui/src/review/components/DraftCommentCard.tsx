@@ -1,16 +1,30 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { formatCommentTarget, type DraftComment } from "@guided-review/ui/review/commentTypes";
+import {
+  formatCommentAnchor,
+  type CommentTarget,
+  type DraftComment,
+} from "@guided-review/ui/review/commentTypes";
+import { useOptionalReviewHost } from "@guided-review/ui/review/host";
 import { Button, Kbd, Textarea } from "@guided-review/ui";
+import { CommentTargetSwitch } from "./CommentTargetSwitch";
 import { ModEnterChord } from "./ShortcutKeys";
 
 interface DraftCommentCardProps {
   comment: DraftComment;
   onRemove: (id: string) => void;
   onUpdate: (id: string, body: string) => void;
+  onTargetChange?: (id: string, target: CommentTarget) => void;
 }
 
 /** Compact local draft shown under the commented line range. */
-export function DraftCommentCard({ comment, onRemove, onUpdate }: DraftCommentCardProps) {
+export function DraftCommentCard({
+  comment,
+  onRemove,
+  onUpdate,
+  onTargetChange,
+}: DraftCommentCardProps) {
+  const host = useOptionalReviewHost();
+  const canPost = Boolean(host?.submit) && Boolean(onTargetChange);
   const [editing, setEditing] = useState(false);
   const [body, setBody] = useState(comment.body);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -60,10 +74,21 @@ export function DraftCommentCard({ comment, onRemove, onUpdate }: DraftCommentCa
       data-testid="draft-comment"
       data-draft-id={comment.id}
       data-draft-scope={comment.scope}
+      data-draft-target={comment.target}
     >
-      <div className="mb-1.5 flex items-center justify-between gap-2">
-        <span className="font-mono text-xs text-muted">Draft · {formatCommentTarget(comment)}</span>
+      <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+        <span className="font-mono text-xs text-muted">
+          {comment.target === "github" ? "Pending" : "Note"} · {formatCommentAnchor(comment)}
+        </span>
         <div className="flex items-center gap-1">
+          {canPost && (
+            <CommentTargetSwitch
+              value={comment.target}
+              onChange={(target) => onTargetChange?.(comment.id, target)}
+              className="mr-1"
+              testId="draft-comment-target"
+            />
+          )}
           {!editing && (
             <button
               type="button"

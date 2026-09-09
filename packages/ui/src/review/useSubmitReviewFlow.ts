@@ -1,14 +1,15 @@
 import { useRef, useState } from "react";
-import type { ReviewCommentInput } from "@guided-review/ui/review/types";
+import type { PRIdentity, ReviewCommentInput } from "@guided-review/ui/review/types";
 import type { ReviewContext } from "@guided-review/core";
 import { EMPTY_REVIEW_BODY_MESSAGE } from "@guided-review/ui/review/types";
 import {
+  githubComments,
   isLineComment,
   type DraftComment,
   type ReviewEvent,
   type ReviewSubmission,
 } from "./commentTypes";
-import { useReviewHost } from "./host";
+import { useReviewHost, type ReviewSubmitTarget } from "./host";
 
 /** Map local draft comments to GitHub create-review `comments[]` payloads. */
 function mapDraftsToReviewComments(drafts: DraftComment[]): ReviewCommentInput[] {
@@ -32,6 +33,16 @@ function mapDraftsToReviewComments(drafts: DraftComment[]): ReviewCommentInput[]
   });
 }
 
+/** PR identity carried on a GitHub `ReviewContext`, when there is one. */
+function identityFromContext(context: ReviewContext | null): PRIdentity | null {
+  if (!context) return null;
+  const { owner, repo, number } = context as Partial<PRIdentity>;
+  if (typeof owner !== "string" || typeof repo !== "string" || typeof number !== "number") {
+    return null;
+  }
+  return { owner, repo, number };
+}
+
 export interface SubmitSuccessInfo {
   event: ReviewEvent;
   commentCount: number;
@@ -40,15 +51,20 @@ export interface SubmitSuccessInfo {
 interface UseSubmitReviewFlowOptions {
   prContext: ReviewContext | null;
   draftComments: DraftComment[];
-  clearDraftComments: () => void;
+  clearDraftComments: (target?: "github" | "local") => void;
   handleExit: () => void;
   overlayRef: React.RefObject<HTMLDivElement | null>;
+  /**
+   * Leave the review after a successful submit. False for the CLI, where the
+   * process owns the window and there is nowhere to exit to.
+   */
+  exitOnSuccess?: boolean;
 }
 
 /**
  * Owns the Submit Review / Connect GitHub modal flow: auth-gated open,
- * submission, success state, and post-submit exit. Extracted from Overlay
- * so the component itself stays focused on layout.
+ * target resolution, submission, success state, and post-submit exit.
+ * Extracted from Overlay so the component itself stays focused on layout.
  *
  * Handlers are plain functions (not useCallback). useOverlayKeyboard mirrors
  * them into refs each render, and modal re-renders are cheap.
@@ -59,6 +75,7 @@ export function useSubmitReviewFlow({
   clearDraftComments,
   handleExit,
   overlayRef,
+  exitOnSuccess = true,
 }: UseSubmitReviewFlowOptions) {
   const host = useReviewHost();
   const [submitReviewOpen, setSubmitReviewOpen] = useState(false);
@@ -66,6 +83,8 @@ export function useSubmitReviewFlow({
   const [submittingReview, setSubmittingReview] = useState(false);
   const [submitReviewError, setSubmitReviewError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<SubmitSuccessInfo | null>(null);
+  /** PR + placement warning for the open Submit Review modal. */
+  const [submitTarget, setSubmitTarget] = useState<ReviewSubmitTarget | null>(null);
   /** Latest submit action from the open Submit Review modal (for ⌘/Ctrl+Enter). */
   const submitReviewActionRef = useRef<(() => void) | null>(null);
   /** Choose-step keys (↑/↓/Enter) for the open Submit Review modal. */
@@ -77,11 +96,15 @@ export function useSubmitReviewFlow({
   /** Prevent double-open while auth status is in flight. */
   const authCheckInFlightRef = useRef(false);
 
+  /** Only GitHub-bound drafts are posted; local notes stay on this machine. */
+  const postableDrafts = githubComments(draftComments);
+
   function exitAfterSubmit(): void {
     setSubmitSuccess(null);
     if (prContext) {
       host.submit?.afterSubmit?.(prContext);
     }
+    if (!exitOnSuccess) return;
     // Post-submit exit is intentional (single CTA) — skip the confirm prompt.
     handleExit();
   }
@@ -106,6 +129,25 @@ export function useSubmitReviewFlow({
     setConnectGitHubOpen(false);
     setSubmitReviewError(null);
     setSubmitReviewOpen(true);
+    void loadSubmitTarget();
+  }
+
+  /**
+   * Ask the host which PR this review posts to. Failure is not fatal: the
+   * modal still opens and submit falls back to the PR identity in context.
+   */
+  async function loadSubmitTarget(): Promise<void> {
+    const resolve = host.submit?.resolveTarget;
+    if (!resolve) {
+      const pr = identityFromContext(prContext);
+      setSubmitTarget(pr ? { pr } : null);
+      return;
+    }
+    try {
+      setSubmitTarget(await resolve(prContext));
+    } catch {
+      setSubmitTarget(null);
+    }
   }
 
   /**
@@ -131,6 +173,7 @@ export function useSubmitReviewFlow({
       if (status.ok && status.auth) {
         setSubmitReviewError(null);
         setSubmitReviewOpen(true);
+        void loadSubmitTarget();
         return;
       }
       setConnectGitHubOpen(true);
@@ -154,10 +197,10 @@ export function useSubmitReviewFlow({
       return;
     }
 
-    const pr = prContext;
-    if (!pr || pr.owner == null || pr.repo == null || pr.number == null) {
+    const pr = submitTarget?.pr ?? identityFromContext(prContext);
+    if (!pr) {
       setSubmitReviewError(
-        "Missing pull request context. Close the review and try again from the PR page.",
+        "No pull request to post this review to. Open a PR for this branch and try again.",
       );
       return;
     }
@@ -172,15 +215,10 @@ export function useSubmitReviewFlow({
     setSubmittingReview(true);
     setSubmitReviewError(null);
 
-    const comments = mapDraftsToReviewComments(draftComments);
+    const comments = mapDraftsToReviewComments(postableDrafts);
 
     try {
-      const result = await submit.submitReview(
-        { owner: pr.owner, repo: pr.repo, number: pr.number },
-        trimmedBody,
-        submission.event,
-        comments,
-      );
+      const result = await submit.submitReview(pr, trimmedBody, submission.event, comments);
 
       if (generation !== submitGenerationRef.current) return;
 
@@ -189,7 +227,9 @@ export function useSubmitReviewFlow({
         return;
       }
 
-      clearDraftComments();
+      // Posted comments are gone from the draft list; local-only notes are not
+      // part of the submission and stay for the coding-agent prompt.
+      clearDraftComments("github");
       setSubmitReviewOpen(false);
       setSubmitReviewError(null);
       setSubmitSuccess({ event: submission.event, commentCount: comments.length });
@@ -210,6 +250,8 @@ export function useSubmitReviewFlow({
     submittingReview,
     submitReviewError,
     submitSuccess,
+    submitTarget,
+    postableCount: postableDrafts.length,
     submitReviewActionRef,
     submitReviewKeyRef,
     connectGitHubActionRef,

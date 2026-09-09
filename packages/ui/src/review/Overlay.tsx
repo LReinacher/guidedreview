@@ -222,6 +222,8 @@ export function Overlay({
     submittingReview,
     submitReviewError,
     submitSuccess,
+    submitTarget,
+    postableCount,
     submitReviewActionRef,
     submitReviewKeyRef,
     connectGitHubActionRef,
@@ -237,6 +239,8 @@ export function Overlay({
     clearDraftComments,
     handleExit,
     overlayRef,
+    // The CLI owns the window; there is nothing to return to after submitting.
+    exitOnSuccess: allowExit,
   });
 
   function handlePrimaryReviewAction() {
@@ -413,6 +417,7 @@ export function Overlay({
         localDiff={localDiff}
         scopeSelectRef={scopeSelectRef}
         notesCount={draftComments.length}
+        pendingCount={postableCount}
         onSubmitReview={handlePrimaryReviewAction}
         onGeneratePrompt={openGeneratePrompt}
       />
@@ -523,6 +528,9 @@ export function Overlay({
       <SubmitReviewModal
         preview={Boolean(host.preview)}
         open={submitReviewOpen}
+        targetLabel={submitTarget?.label ?? null}
+        commentCount={postableCount}
+        warning={submitTarget?.warning ?? null}
         onClose={closeSubmitReviewModal}
         onSubmit={(submission) => {
           void handleSubmitReview(submission);
@@ -539,6 +547,7 @@ export function Overlay({
         open={submitSuccess !== null}
         event={submitSuccess?.event ?? "COMMENT"}
         commentCount={submitSuccess?.commentCount ?? 0}
+        exitsReview={allowExit}
         onExit={exitAfterSubmit}
       />
 

@@ -12,6 +12,7 @@ import { buildFileReviewPlan } from "@guided-review/core";
 import {
   displayLineNumber,
   linesInSelection,
+  type CommentTarget,
   type DraftComment,
   type DraftLineComment,
   type LineSelection,
@@ -78,8 +79,9 @@ export function displayUnitCount(plan: ReviewPlan | null): number {
 
 /**
  * A draft as it may actually be found in storage. Sessions written before
- * whole-file comments existed carry no `scope`, and older ones no
- * `selectedCode` — `normalizeStoredDraft` fills both in on restore.
+ * whole-file comments existed carry no `scope`, older ones no `selectedCode`,
+ * and pre-GitHub-submit ones no `target` — `normalizeStoredDraft` fills them
+ * in on restore.
  */
 type StoredDraft = Partial<Omit<DraftLineComment, "scope">> & {
   id: string;
@@ -87,28 +89,50 @@ type StoredDraft = Partial<Omit<DraftLineComment, "scope">> & {
   body: string;
   unitId?: string;
   scope?: DraftComment["scope"];
+  target?: CommentTarget;
 };
 
+/** Bumped when a persisted session can no longer be read by this version. */
+export const PERSISTED_SESSION_VERSION = 2;
+
 interface PersistedSession {
+  version?: number;
   diff: ParsedDiff;
   plan: ReviewPlan;
   prContext: ReviewContext | null;
   /** Index into the display unit list (0 = PR description, then plan units). */
   currentUnitIndex: number;
-  /** Local draft comments (session-scoped; not posted to GitHub). */
+  /** Draft comments, both GitHub-bound and local-only. */
   draftComments?: StoredDraft[];
+  /** How the persisted plan was built. Absent on v1 sessions (always AI). */
+  planSource?: PlanSource;
+  needsProvider?: boolean;
+  /** Hash of the diff this review was built from, for staleness checks. */
+  diffHash?: string | null;
+  savedAt?: string;
+}
+
+/** What a caller learns from a successful restore. */
+export interface RestoredSession {
+  planSource: PlanSource;
+  /** Null when the host does not track diff hashes (the extension). */
+  diffHash: string | null;
+  draftCount: number;
 }
 
 /** Anything with (or missing) a line anchor restores as a line comment. */
 function normalizeStoredDraft(draft: StoredDraft): DraftComment {
   const { id, filePath, body, unitId } = draft;
-  if (draft.scope === "file") return { scope: "file", id, filePath, body, unitId };
+  // Drafts written before comment targets existed were all GitHub-bound.
+  const target: CommentTarget = draft.target === "local" ? "local" : "github";
+  if (draft.scope === "file") return { scope: "file", id, filePath, body, unitId, target };
   return {
     scope: "line",
     id,
     filePath,
     body,
     unitId,
+    target,
     side: draft.side ?? "RIGHT",
     startLine: draft.startLine ?? 0,
     endLine: draft.endLine ?? 0,
@@ -156,8 +180,14 @@ interface ReviewState {
   sessionKey: string | null;
   /** Unified vs side-by-side code view (UI preference, not session data). */
   diffViewMode: DiffViewMode;
-  /** `null` until a plan is installed. File plans are not persisted. */
+  /** `null` until a plan is installed. */
   planSource: PlanSource | null;
+  /**
+   * Hash of the diff this review was built from. Hosts that can detect the
+   * underlying code changing (the CLI) set it so a restored session can be
+   * flagged stale; the extension leaves it null.
+   */
+  diffHash: string | null;
 
   /** navigate = unit walkthrough; comment = line selection for drafts. */
   uiMode: UiMode;
@@ -176,7 +206,12 @@ interface ReviewState {
    * Open a walkthrough on an already-built file plan without a loading flash
    * or an annotation stream. Bumps streamGeneration so a late SSE is ignored.
    */
-  bootReady: (args: { sessionKey: string; diff: ParsedDiff; plan: ReviewPlan }) => number;
+  bootReady: (args: {
+    sessionKey: string;
+    diff: ParsedDiff;
+    plan: ReviewPlan;
+    diffHash?: string | null;
+  }) => number;
   setPRContext: (prContext: ReviewContext) => void;
   setDiff: (diff: ParsedDiff) => void;
   setBuildPhase: (phase: BuildPhase, generation?: number) => void;
@@ -200,6 +235,7 @@ interface ReviewState {
   goNext: () => void;
   goPrev: () => void;
   setDiffViewMode: (mode: DiffViewMode) => void;
+  setDiffHash: (diffHash: string | null) => void;
 
   enterCommentMode: (lines: SelectableLine[]) => void;
   /**
@@ -217,13 +253,15 @@ interface ReviewState {
   moveLineCursor: (delta: number, extend: boolean) => void;
   openComposer: () => void;
   closeComposer: () => void;
-  saveDraftComment: (body: string, unitId?: string) => void;
+  saveDraftComment: (body: string, unitId?: string, target?: CommentTarget) => void;
   openFileComposer: (filePath: string) => void;
   closeFileComposer: () => void;
-  saveFileComment: (body: string, unitId?: string) => void;
+  saveFileComment: (body: string, unitId?: string, target?: CommentTarget) => void;
   updateDraftComment: (id: string, body: string) => void;
+  setDraftCommentTarget: (id: string, target: CommentTarget) => void;
   removeDraftComment: (id: string) => void;
-  clearDraftComments: () => void;
+  /** Drop every draft, or only those bound for the given destination. */
+  clearDraftComments: (target?: CommentTarget) => void;
 }
 
 /**
@@ -256,6 +294,7 @@ export const useReviewStore = create<ReviewState>((set, get) => ({
   sessionKey: null,
   diffViewMode: DEFAULT_DIFF_VIEW_MODE,
   planSource: null,
+  diffHash: null,
   uiMode: "navigate",
   selectableLines: [],
   lineSelection: null,
@@ -281,12 +320,13 @@ export const useReviewStore = create<ReviewState>((set, get) => ({
       streamGeneration,
       draftComments: [],
       planSource: null,
+      diffHash: null,
       ...COMMENT_UI_RESET,
     });
     return streamGeneration;
   },
 
-  bootReady: ({ sessionKey, diff, plan }) => {
+  bootReady: ({ sessionKey, diff, plan, diffHash }) => {
     const streamGeneration = get().streamGeneration + 1;
     set({
       status: "ready",
@@ -300,6 +340,7 @@ export const useReviewStore = create<ReviewState>((set, get) => ({
       streamGeneration,
       planSource: "files",
       draftComments: [],
+      ...(diffHash !== undefined ? { diffHash } : {}),
       ...COMMENT_UI_RESET,
     });
     return streamGeneration;
@@ -440,6 +481,8 @@ export const useReviewStore = create<ReviewState>((set, get) => ({
     void getActiveReviewHost()?.persistDiffViewMode?.(mode);
   },
 
+  setDiffHash: (diffHash) => set({ diffHash }),
+
   enterCommentMode: (lines) => {
     if (lines.length === 0) return;
     set({
@@ -555,7 +598,7 @@ export const useReviewStore = create<ReviewState>((set, get) => ({
 
   closeComposer: () => set({ composerOpen: false }),
 
-  saveDraftComment: (body, unitId) => {
+  saveDraftComment: (body, unitId, target = "github") => {
     const trimmed = body.trim();
     if (!trimmed) return;
 
@@ -574,6 +617,7 @@ export const useReviewStore = create<ReviewState>((set, get) => ({
     const draft: DraftComment = {
       id: newDraftId(),
       scope: "line",
+      target,
       filePath: first.filePath,
       side: first.side,
       startLine: Math.min(startNum, endNum),
@@ -594,7 +638,7 @@ export const useReviewStore = create<ReviewState>((set, get) => ({
 
   closeFileComposer: () => set({ fileComposerPath: null }),
 
-  saveFileComment: (body, unitId) => {
+  saveFileComment: (body, unitId, target = "github") => {
     const trimmed = body.trim();
     if (!trimmed) return;
     const { fileComposerPath, draftComments } = get();
@@ -603,6 +647,7 @@ export const useReviewStore = create<ReviewState>((set, get) => ({
     const draft: DraftComment = {
       id: newDraftId(),
       scope: "file",
+      target,
       filePath: fileComposerPath,
       body: trimmed,
       unitId,
@@ -619,13 +664,22 @@ export const useReviewStore = create<ReviewState>((set, get) => ({
     }));
   },
 
+  setDraftCommentTarget: (id, target) => {
+    set((state) => ({
+      draftComments: state.draftComments.map((d) => (d.id === id ? { ...d, target } : d)),
+    }));
+  },
+
   removeDraftComment: (id) => {
     set((state) => ({
       draftComments: state.draftComments.filter((d) => d.id !== id),
     }));
   },
 
-  clearDraftComments: () => set({ draftComments: [] }),
+  clearDraftComments: (target) =>
+    set((state) => ({
+      draftComments: target ? state.draftComments.filter((d) => d.target !== target) : [],
+    })),
 }));
 
 /** Bumped when the user sets a mode so pending storage reads are dropped. */
@@ -665,10 +719,11 @@ export function resetDiffViewModeHydrationForTests(): void {
 }
 
 /**
- * Persist the current review session so reopening the overlay on the same PR resumes
- * without a fresh AI call. This is an optimization only — if storage access fails (e.g.
- * the access grant hasn't propagated yet), we log and move on rather than breaking the
- * review flow.
+ * Persist the current review session so the same review can be resumed —
+ * reopening the overlay on the same PR, or restarting a CLI that crashed.
+ *
+ * Best-effort by design: if storage access fails (e.g. an access grant hasn't
+ * propagated yet) we log and move on rather than breaking the review.
  */
 export async function persistSession(): Promise<void> {
   const {
@@ -681,21 +736,31 @@ export async function persistSession(): Promise<void> {
     sessionKey,
     draftComments,
     planSource,
+    diffHash,
   } = useReviewStore.getState();
   if (status !== "ready" || !diff || !plan || !sessionKey) return;
-  // The file-per-unit fallback is cheap to rebuild and would otherwise be
-  // resumed in place of the AI plan once a provider is configured.
-  if (needsProvider || planSource !== "ai") return;
 
   const host = getActiveReviewHost();
   if (!host) return;
 
+  // The file-per-unit fallback is cheap to rebuild, and resuming it would
+  // shadow the AI plan once a provider is configured. Hosts whose sessions
+  // have to survive a crash (the CLI) opt in anyway: an unstructured review
+  // still holds comments the user does not want to retype.
+  if (planSource !== "ai" && !host.persistPartialSessions) return;
+  if (needsProvider && !host.persistPartialSessions) return;
+
   const payload: PersistedSession = {
+    version: PERSISTED_SESSION_VERSION,
     diff,
     plan,
     prContext,
     currentUnitIndex,
     draftComments,
+    planSource: planSource ?? "files",
+    needsProvider,
+    diffHash,
+    savedAt: new Date().toISOString(),
   };
   try {
     await host.persistSession(sessionKey, payload);
@@ -705,41 +770,48 @@ export async function persistSession(): Promise<void> {
 }
 
 /**
- * Attempt to restore a previously persisted session for this PR. Returns true if restored,
- * false if there's nothing to restore or storage access failed — callers should fall back
- * to starting a fresh review in either case.
+ * Restore a previously persisted session for this key. Returns null when there
+ * is nothing to restore or storage access failed — callers fall back to
+ * starting a fresh review in either case.
  */
-export async function restoreSession(sessionKey: string): Promise<boolean> {
+export async function restoreSession(sessionKey: string): Promise<RestoredSession | null> {
   const host = getActiveReviewHost();
-  if (!host) return false;
+  if (!host) return null;
 
   let saved: PersistedSession | undefined;
   try {
     saved = (await host.restoreSession(sessionKey)) as PersistedSession | undefined;
   } catch (error) {
     console.warn("Guided Review: failed to restore session", error);
-    return false;
+    return null;
   }
-  if (!saved) return false;
+  if (!saved?.diff || !saved.plan) return null;
 
   const total = displayUnitCount(saved.plan);
-  const currentUnitIndex = Math.min(Math.max(saved.currentUnitIndex, 0), total - 1);
+  const currentUnitIndex = Math.min(Math.max(saved.currentUnitIndex ?? 0, 0), total - 1);
+  // v1 sessions were only ever written for AI plans.
+  const planSource: PlanSource = saved.planSource ?? "ai";
+  const draftComments = (saved.draftComments ?? []).map(normalizeStoredDraft);
 
   useReviewStore.setState({
     status: "ready",
-    // Persisted sessions are always AI-built (see persistSession).
-    needsProvider: false,
-    planSource: "ai",
+    needsProvider: saved.needsProvider ?? false,
+    planSource,
     diff: saved.diff,
     plan: saved.plan,
     prContext: saved.prContext ?? null,
     currentUnitIndex,
     sessionKey,
+    diffHash: saved.diffHash ?? null,
     error: null,
     buildPhase: null,
     providerLabel: null,
-    draftComments: (saved.draftComments ?? []).map(normalizeStoredDraft),
+    draftComments,
     ...COMMENT_UI_RESET,
   });
-  return true;
+  return {
+    planSource,
+    diffHash: saved.diffHash ?? null,
+    draftCount: draftComments.length,
+  };
 }

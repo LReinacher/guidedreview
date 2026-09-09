@@ -73,10 +73,11 @@ Narrative version: [Connect GitHub → Private repos and org SSO](/docs/connect-
 ## Session and resume
 
 - **Extension:** Active plans live in `chrome.storage.session`, keyed by `owner/repo#number`. Switching Conversation ↔ Files changed should resume the same step ([Your first review → Resume later](/docs/first-review#resume-later)). Closing the browser (or ending the session) clears the plan. Settings and API keys in local storage remain ([Privacy & data](/docs/privacy-and-data#what-stays-local)).
-- **CLI:** The session lives with the running local server. Stopping the process (Ctrl+C) ends it. Restarting `npx @guided-review/cli` starts a fresh walk for the current scope.
+- **CLI:** Reviews are saved under `.git/guided-review/sessions` in the repo, keyed by base, branch, and scope. Stopping the process (Ctrl+C) or losing it to a crash does not end the review — restarting `npx @guided-review/cli` resumes the same structure, step, and comments. Deleting that directory starts over.
+- If the diff on disk moved on since the review was saved, the overlay says so; **Refresh** loads the new diff and keeps your comments.
 - Starting Guided Review again after a clear rebuilds a **new** plan for the current diff ([How a review plan works](/docs/how-it-works)).
 
-Draft comments (extension) and notes (CLI) are part of that session until you submit, Generate Prompt, discard them, or stop the host.
+Draft comments are part of that review until you submit them, discard them, or (extension only) end the browser session.
 
 ## CLI
 

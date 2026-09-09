@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { useReviewStore } from "./store";
-import { isLineComment, lineIdFor, type SelectableLine } from "./commentTypes";
+import { githubComments, isLineComment, lineIdFor, type SelectableLine } from "./commentTypes";
 
 function line(index: number): SelectableLine {
   return {
@@ -73,6 +73,7 @@ describe("commenting on a whole file", () => {
     expect(draft).toEqual({
       id: expect.any(String) as unknown as string,
       scope: "file",
+      target: "github",
       filePath: "src/foo.ts",
       body: "this module does too much",
       unitId: "unit-1",
@@ -88,5 +89,30 @@ describe("commenting on a whole file", () => {
     useReviewStore.getState().saveFileComment("too late");
 
     expect(useReviewStore.getState().draftComments).toEqual([]);
+  });
+});
+
+describe("comment destinations", () => {
+  it("keeps local notes out of a GitHub submission and out of the way when it clears", () => {
+    useReviewStore.getState().startCommentAtLine(LINES[0].id);
+    useReviewStore.getState().saveDraftComment("post this", "unit-1", "github");
+    useReviewStore.getState().openFileComposer("src/foo.ts");
+    useReviewStore.getState().saveFileComment("just for me", "unit-1", "local");
+
+    const drafts = useReviewStore.getState().draftComments;
+    expect(githubComments(drafts).map((d) => d.body)).toEqual(["post this"]);
+
+    // Submitting posts the GitHub ones and consumes only those.
+    useReviewStore.getState().clearDraftComments("github");
+    expect(useReviewStore.getState().draftComments.map((d) => d.body)).toEqual(["just for me"]);
+  });
+
+  it("moves a saved comment between destinations", () => {
+    useReviewStore.getState().startCommentAtLine(LINES[0].id);
+    useReviewStore.getState().saveDraftComment("post this", "unit-1", "github");
+    const [draft] = useReviewStore.getState().draftComments;
+
+    useReviewStore.getState().setDraftCommentTarget(draft.id, "local");
+    expect(githubComments(useReviewStore.getState().draftComments)).toEqual([]);
   });
 });

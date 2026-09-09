@@ -69,5 +69,14 @@ export type {
   AnnotateReviewInput as ProviderAnnotateInput,
 } from "./providers/types";
 
+export type {
+  PRIdentity,
+  ReviewEvent,
+  ReviewCommentInput,
+  SubmitReviewResponse,
+} from "./github/types";
+export { EMPTY_REVIEW_BODY_MESSAGE } from "./github/types";
+export { submitPullRequestReview } from "./github/submitReview";
+
 export { formatNotesMarkdown } from "./notes/formatNotes";
 export { formatAgentPrompt } from "./notes/formatAgentPrompt";

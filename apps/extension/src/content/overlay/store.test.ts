@@ -479,7 +479,7 @@ describe("useReviewStore", () => {
       resetStore();
       const restored = await restoreSession(SESSION_KEY);
 
-      expect(restored).toBe(true);
+      expect(restored).toMatchObject({ planSource: "ai", draftCount: 0 });
       const state = useReviewStore.getState();
       expect(state.status).toBe("ready");
       expect(state.diff).toEqual(diff);
@@ -512,12 +512,12 @@ describe("useReviewStore", () => {
       expect(useReviewStore.getState().currentUnitIndex).toBe(1);
     });
 
-    it("restoreSession returns false when nothing was persisted", async () => {
+    it("restoreSession returns null when nothing was persisted", async () => {
       resetStore();
       const restored = await restoreSession(
         buildSessionKey({ owner: "acme", repo: "widgets", number: 999 }),
       );
-      expect(restored).toBe(false);
+      expect(restored).toBeNull();
       expect(useReviewStore.getState().status).toBe("idle");
     });
 

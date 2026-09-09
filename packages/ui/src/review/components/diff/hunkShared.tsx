@@ -166,6 +166,7 @@ export function LineExtras({
   unitId,
 }: LineExtrasProps) {
   const saveDraftComment = useReviewStore((s) => s.saveDraftComment);
+  const setDraftCommentTarget = useReviewStore((s) => s.setDraftCommentTarget);
   const closeComposer = useReviewStore((s) => s.closeComposer);
   const removeDraftComment = useReviewStore((s) => s.removeDraftComment);
   const updateDraftComment = useReviewStore((s) => s.updateDraftComment);
@@ -195,6 +196,7 @@ export function LineExtras({
           comment={d}
           onRemove={requestRemoveDraft}
           onUpdate={updateDraftComment}
+          onTargetChange={setDraftCommentTarget}
         />
       ))}
       {showComposer && (
@@ -202,7 +204,7 @@ export function LineExtras({
           filePath={composerRange.filePath}
           startLine={composerRange.startLine}
           endLine={composerRange.endLine}
-          onSave={(body) => saveDraftComment(body, unitId)}
+          onSave={(body, target) => saveDraftComment(body, unitId, target)}
           onCancel={closeComposer}
         />
       )}

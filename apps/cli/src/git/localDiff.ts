@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { parseDiff, type ParsedDiff, type ReviewContext } from "@guided-review/core";
+import { resolveBaseRef } from "./baseRef";
 import { GitError, runGit } from "./run";
 
 export interface LocalDiffOptions {
@@ -43,6 +44,8 @@ export interface DiffScopeOption {
 
 export interface LocalRepoState {
   repoRoot: string;
+  /** Absolute `.git` dir — where durable review sessions are stored. */
+  gitDir: string;
   baseRef: string;
   headRef: string;
   mergeBase: string;
@@ -85,37 +88,6 @@ export function reviewHasChanges(snapshot: LocalReviewSnapshot): boolean {
 
 function nullDevice(): string {
   return process.platform === "win32" ? "NUL" : "/dev/null";
-}
-
-async function resolveBase(repoRoot: string, requested?: string): Promise<string> {
-  if (requested) {
-    try {
-      await runGit(["rev-parse", "--verify", requested], repoRoot);
-      return requested;
-    } catch {
-      throw new GitError(
-        `Base ref "${requested}" does not exist. Pass --base with a real branch or commit.`,
-      );
-    }
-  }
-
-  const candidates = ["origin/HEAD", "main", "master"];
-  for (const candidate of candidates) {
-    try {
-      const resolved = (await runGit(["rev-parse", "--abbrev-ref", candidate], repoRoot)).trim();
-      if (candidate === "origin/HEAD") {
-        return resolved || candidate;
-      }
-      await runGit(["rev-parse", "--verify", candidate], repoRoot);
-      return candidate;
-    } catch {
-      // try next
-    }
-  }
-
-  throw new GitError(
-    "Could not find a default base branch (origin/HEAD, main, or master). Pass --base <ref>.",
-  );
 }
 
 /** Bound concurrent `git diff --no-index` child processes for untracked files. */
@@ -407,8 +379,14 @@ export async function currentDiffHash(repo: LocalRepoState, scope: DiffScopeId):
   return hashDiff(await rawDiffForScope(repo, scope, untracked));
 }
 
-function sessionKeyFor(repo: LocalRepoState, scope: DiffScopeId, raw: string): string {
-  return `${path.basename(repo.repoRoot)}:${repo.baseRef}:${repo.headRef}:${scope}:${hashDiff(raw).slice(0, 12)}`;
+/**
+ * Identity of a review, stable across edits to the diff. It deliberately
+ * excludes the diff hash: a review has to survive the user changing the code
+ * mid-review (that is the normal case), and staleness is tracked separately by
+ * comparing the persisted `diffHash` against the current one.
+ */
+function sessionKeyFor(repo: LocalRepoState, scope: DiffScopeId): string {
+  return `${path.basename(repo.repoRoot)}:${repo.baseRef}:${repo.headRef}:${scope}`;
 }
 
 function contextFor(
@@ -434,12 +412,14 @@ async function inspectLocalRepo(options: LocalDiffOptions): Promise<LocalRepoSta
     throw new GitError("Not a git repository. Run this from a repo, or pass a path to one.");
   }
 
-  const baseRef = await resolveBase(repoRoot, options.base);
-  const mergeBase = (await runGit(["merge-base", "HEAD", baseRef], repoRoot)).trim();
+  const gitDir = (await runGit(["rev-parse", "--absolute-git-dir"], repoRoot)).trim();
   const headRef = (await runGit(["rev-parse", "--abbrev-ref", "HEAD"], repoRoot)).trim() || "HEAD";
+  const baseRef = await resolveBaseRef(repoRoot, headRef, options.base);
+  const mergeBase = (await runGit(["merge-base", "HEAD", baseRef], repoRoot)).trim();
 
   return {
     repoRoot,
+    gitDir,
     baseRef,
     headRef,
     mergeBase,
@@ -469,7 +449,7 @@ async function snapshotFrom(
     context: contextFor(repo, commits, selected),
     diff,
     raw,
-    sessionKey: sessionKeyFor(repo, selected, raw),
+    sessionKey: sessionKeyFor(repo, selected),
     empty: diff.files.length === 0,
   };
 }

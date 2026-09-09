@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { formatLineRangeLabel } from "@guided-review/ui/review/commentTypes";
+import { formatLineRangeLabel, type CommentTarget } from "@guided-review/ui/review/commentTypes";
+import { useOptionalReviewHost } from "@guided-review/ui/review/host";
 import { Button, Kbd, Textarea } from "@guided-review/ui";
+import { CommentTargetSwitch } from "./CommentTargetSwitch";
 import { ModEnterChord } from "./ShortcutKeys";
 
 interface CommentComposerProps {
@@ -8,7 +10,7 @@ interface CommentComposerProps {
   /** Omit both for a whole-file comment. */
   startLine?: number;
   endLine?: number;
-  onSave: (body: string) => void;
+  onSave: (body: string, target: CommentTarget) => void;
   onCancel: () => void;
 }
 
@@ -23,7 +25,11 @@ export function CommentComposer({
   onSave,
   onCancel,
 }: CommentComposerProps) {
+  const host = useOptionalReviewHost();
+  // Without a submit host there is nowhere to post to, so every comment is local.
+  const canPost = Boolean(host?.submit);
   const [body, setBody] = useState("");
+  const [target, setTarget] = useState<CommentTarget>(canPost ? "github" : "local");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isFileComment = startLine === undefined || endLine === undefined;
 
@@ -43,7 +49,7 @@ export function CommentComposer({
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
       event.stopPropagation();
-      if (canSave) onSave(body);
+      if (canSave) onSave(body, target);
     }
   }
 
@@ -73,6 +79,14 @@ export function CommentComposer({
         data-testid="comment-composer-input"
       />
       <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
+        {canPost && (
+          <CommentTargetSwitch
+            value={target}
+            onChange={setTarget}
+            className="mr-auto"
+            testId="comment-composer-target"
+          />
+        )}
         <Button variant="secondary" size="sm" onClick={onCancel}>
           Cancel
           <Kbd>Esc</Kbd>
@@ -81,7 +95,7 @@ export function CommentComposer({
           size="sm"
           disabled={!canSave}
           onClick={() => {
-            if (canSave) onSave(body);
+            if (canSave) onSave(body, target);
           }}
           data-testid="comment-composer-save"
           className="disabled:opacity-40"

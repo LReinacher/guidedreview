@@ -8,6 +8,7 @@ export interface CliArgs {
   open: boolean;
   staged: boolean;
   includeUntracked: boolean;
+  github: boolean;
   provider?: string;
   model?: string;
   agent?: string;
@@ -29,6 +30,7 @@ export function parseArgs(argv: string[]): CliArgs {
     open: true,
     staged: false,
     includeUntracked: true,
+    github: true,
     help: false,
   };
 
@@ -49,6 +51,10 @@ export function parseArgs(argv: string[]): CliArgs {
     }
     if (token === "--no-untracked") {
       args.includeUntracked = false;
+      continue;
+    }
+    if (token === "--no-github") {
+      args.github = false;
       continue;
     }
     if (token === "--base") {
@@ -99,11 +105,13 @@ export const HELP = `Usage: guidedreview [dir] [options]
 
 Review a local branch, commit, or working tree. Opens a browser UI.
 
-  --base <ref>       Base branch (default: origin/HEAD, then main, then master)
+  --base <ref>       Base branch (default: the open PR's base, then the
+                     remote's default branch)
   --port <n>         Listen port (default: ${DEFAULT_PORT})
   --no-open          Print the URL without opening a browser
   --staged           Start on staged (index vs HEAD) changes
   --no-untracked     Skip untracked files
+  --no-github        Never offer to post this review to the branch's PR
   --provider <id>    anthropic | openai | grok
   --model <id>       Provider model id
   --agent <id>       claude-code | codex | grok (use that coding agent's login)

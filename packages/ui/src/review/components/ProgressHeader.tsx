@@ -28,8 +28,10 @@ interface ProgressHeaderProps {
   /** Opens the Submit Review modal or Generate Prompt (local). */
   onSubmitReview: () => void;
   onGeneratePrompt?: () => void;
-  /** When set, the primary action is generate-prompt (no GitHub submit). */
+  /** All saved drafts — what Generate Prompt would export. */
   notesCount?: number;
+  /** Drafts bound for GitHub — what Submit Review would post. */
+  pendingCount?: number;
   localDiff?: LocalDiffControls;
   scopeSelectRef?: Ref<SelectHandle | null>;
 }
@@ -218,6 +220,7 @@ export function ProgressHeader({
   onSubmitReview,
   onGeneratePrompt,
   notesCount,
+  pendingCount = 0,
   localDiff,
   scopeSelectRef,
 }: ProgressHeaderProps) {
@@ -331,7 +334,9 @@ export function ProgressHeader({
             disabled={primaryDisabled}
             data-testid="submit-review-button"
           >
-            {primaryIsExport ? "Generate Prompt" : "Submit Review"}
+            {primaryIsExport
+              ? "Generate Prompt"
+              : `Submit Review${pendingCount > 0 ? ` (${pendingCount})` : ""}`}
             <span className="hidden sm:inline-flex">
               <ModEnterChord />
             </span>
@@ -373,7 +378,7 @@ export function ProgressHeader({
         >
           <p className="m-0 flex min-w-0 items-center gap-2.5 text-sm leading-snug text-foreground">
             <RefreshIcon className="text-muted" />
-            <span>The diff on disk has changed. Refresh the page to get the latest changes.</span>
+            <span>The diff on disk has changed. Refresh to load it — your comments are kept.</span>
           </p>
           <Button
             variant="secondary"

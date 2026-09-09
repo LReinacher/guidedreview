@@ -10,16 +10,25 @@ export class GitError extends Error {
   }
 }
 
+export interface RunGitOptions {
+  allowExitCodes?: number[];
+  /** Bound commands that touch the network (`ls-remote`) so they cannot hang. */
+  timeoutMs?: number;
+  env?: NodeJS.ProcessEnv;
+}
+
 export async function runGit(
   args: string[],
   cwd: string,
-  options?: { allowExitCodes?: number[] },
+  options?: RunGitOptions,
 ): Promise<string> {
   try {
     const { stdout } = await execFileAsync("git", args, {
       cwd,
       encoding: "utf8",
       maxBuffer: 32 * 1024 * 1024,
+      timeout: options?.timeoutMs,
+      env: options?.env,
     });
     return stdout;
   } catch (error: unknown) {
@@ -31,7 +40,7 @@ export async function runGit(
 export async function runGitBuffer(
   args: string[],
   cwd: string,
-  options?: { allowExitCodes?: number[] },
+  options?: RunGitOptions,
 ): Promise<Buffer> {
   try {
     const { stdout } = await execFileAsync("git", args, {
@@ -46,11 +55,7 @@ export async function runGitBuffer(
   }
 }
 
-function handleGitError(
-  error: unknown,
-  args: string[],
-  options?: { allowExitCodes?: number[] },
-): string {
+function handleGitError(error: unknown, args: string[], options?: RunGitOptions): string {
   const err = error as {
     code?: string | number;
     status?: number;
