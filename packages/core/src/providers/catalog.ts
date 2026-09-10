@@ -51,7 +51,7 @@ export const PROVIDERS: Record<ProviderId, ProviderDefinition> = {
     displayName: "Claude (Anthropic)",
     keyPlaceholder: "sk-ant-…",
     iconSrc: "providers/claude.svg",
-    defaultModelId: "claude-opus-4-8",
+    defaultModelId: "claude-opus-5",
   },
   openai: {
     id: "openai",
