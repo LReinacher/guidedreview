@@ -36,12 +36,13 @@ The CLI binds `127.0.0.1:7182` (ASCII G+R), keeps a short terminal banner (URL, 
 
 The header shows the current branch and the base branch. A dropdown picks the diff:
 
+- **Everything on this branch** — committed, staged, unstaged and untracked work together, versus the base. Shown only when there is uncommitted work sitting on top of commits; with a clean tree it would be the branch scope, and with no commits it would be the uncommitted one.
 - **Branch vs base** — committed work on this branch since it diverged from the base (`git diff <merge-base> HEAD`)
 - **Uncommitted** — staged and unstaged work versus `HEAD` (untracked files included unless you passed `--no-untracked`)
 - **Unstaged** — worktree versus the index only
 - **A specific commit** — that commit’s patch
 
-Default selected scope: the first non-empty of branch, uncommitted, unstaged, then the newest commit. `--staged` starts on index-only uncommitted work.
+Default selected scope: the first non-empty of branch, uncommitted, unstaged, then the newest commit. **Everything** is never picked for you — choose it when you want the branch and your working tree reviewed as one change. `--staged` starts on index-only uncommitted work.
 
 Base resolution, in order: `--base` → `origin/HEAD` → `main` → `master`.
 
@@ -77,7 +78,9 @@ The local UI has **Settings** (header, `⌘/Ctrl` + `,`, or **Connect AI Provide
 
 ## Collapsed lines
 
-Where a patch skips lines between two hunks, the diff shows a bar with the number of hidden lines. Click `↓` or `↑` to reveal 20 more from either end, or **Expand N Hidden Lines** when the rest fits in one step. The CLI reads them from the file on disk, so this only works for text files still present in the reviewed scope.
+Every run of file the patch leaves out gets a bar with the number of hidden lines: between two hunks, above the first one, and below the last. Click `↓` or `↑` to reveal 20 more from either end, or **Expand N Hidden Lines** when the rest fits in one step — so a three-line diff can be read with the whole file around it. **Reset** in the file header collapses everything expanded in that file.
+
+The CLI reads the lines from the file on disk, so this only works for text files still present in the reviewed scope.
 
 ## Config file
 
@@ -107,6 +110,8 @@ Example shape (all fields optional — only what you saved appears):
 Prefer editing through **Settings** in the UI. If you hand-edit the file, restart the CLI (or re-open Settings and save) so the running server picks up the change. Flags and env still override the file for that run. Clearing a key: remove `apiKey` from the file, or clear it in Settings — [Privacy & data → Clear data](/docs/privacy-and-data#clear-data-and-disconnect).
 
 ## Notes
+
+Two escape hatches sit on the Change summary card. **Rebuild Structure** runs the AI pass again over the same diff and keeps every comment — useful when the grouping came out wrong. **Start Over** discards the review outright, comments included, and starts that diff from one unit per file.
 
 A review is saved as you go, under `.git/guided-review/sessions` in the repo you are reviewing. Close the tab or lose the process and the next run resumes the same review — the structure it built, where you were, and every comment you had written, posted or not. Saved reviews are keyed by base, branch, and scope, and never leave the clone.
 

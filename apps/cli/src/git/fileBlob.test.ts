@@ -5,7 +5,12 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { buildLocalReview } from "./localDiff";
-import { MAX_CONTEXT_LINES, readReviewFileLines, readReviewImage } from "./fileBlob";
+import {
+  MAX_CONTEXT_LINES,
+  readReviewFileLineCount,
+  readReviewFileLines,
+  readReviewImage,
+} from "./fileBlob";
 
 const execFileAsync = promisify(execFile);
 
@@ -111,6 +116,14 @@ describe("readReviewFileLines", () => {
       "new",
     ]);
     expect(await readReviewFileLines(snapshot, "big.ts", "new", 999, 1000)).toEqual([]);
+  });
+
+  it("reports how long each side of the file is, so the tail knows where to stop", async () => {
+    const root = await makeTextRepo();
+    const snapshot = await buildLocalReview({ cwd: root, scope: "branch" });
+
+    expect(await readReviewFileLineCount(snapshot, "big.ts", "new")).toBe(60);
+    expect(await readReviewFileLineCount(snapshot, "missing.ts", "new")).toBeNull();
   });
 
   it("refuses files outside the diff, bad ranges, and oversized requests", async () => {

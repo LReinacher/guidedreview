@@ -12,12 +12,22 @@ const CHUNK = 20;
 interface HunkGapPlaceholderProps {
   filePath: string;
   gap: HunkGap;
+  /**
+   * Reports whether this gap currently shows revealed lines, so the file card
+   * can offer to collapse them again.
+   */
+  onExpandedChange?: (key: string, expanded: boolean) => void;
 }
 
 const BAR_CLASSES =
   // Match the surrounding hunk surface (parent is bg-surface-raised); no
   // separate wash so it reads as part of the diff, not a chrome bar.
   "flex w-full items-center justify-center gap-2 border-y border-border py-1.5 font-mono text-sm text-faint";
+
+/** Line numbers before the start of a side (an added top-of-file run) read blank. */
+function lineLabel(line: number): string {
+  return line >= 1 ? String(line) : "";
+}
 
 /**
  * One revealed context line. Not commentable: `buildSelectableLines` only
@@ -44,18 +54,22 @@ function ContextRow({
   );
 
   if (split) {
+    // No row border: split hunk rows have none either, and a rule under every
+    // revealed line made expanded context read as a different kind of content.
     return (
-      <div className="flex min-w-0 border-b border-border-strong last:border-b-0">
-        <div className={cn(DIFF_LINE_WRAP, "flex-1 overflow-hidden")}>
+      <div className="flex min-w-0">
+        {/* Both columns carry the new-side number: a lookup resolves against
+            the file as it is now, whichever column the click landed in. */}
+        <div className={cn(DIFF_LINE_WRAP, "flex-1 overflow-hidden")} data-line-number={newLine}>
           <span className="w-5 shrink-0" aria-hidden="true" />
-          <span className={lineNumberClasses(false)}>{oldLine}</span>
+          <span className={lineNumberClasses(false)}>{lineLabel(oldLine)}</span>
           <span className="w-4 shrink-0" aria-hidden="true" />
           {code}
         </div>
         <div className="w-px shrink-0 bg-border" aria-hidden="true" />
-        <div className={cn(DIFF_LINE_WRAP, "flex-1 overflow-hidden")}>
+        <div className={cn(DIFF_LINE_WRAP, "flex-1 overflow-hidden")} data-line-number={newLine}>
           <span className="w-5 shrink-0" aria-hidden="true" />
-          <span className={lineNumberClasses(false)}>{newLine}</span>
+          <span className={lineNumberClasses(false)}>{lineLabel(newLine)}</span>
           <span className="w-4 shrink-0" aria-hidden="true" />
           {code}
         </div>
@@ -64,10 +78,10 @@ function ContextRow({
   }
 
   return (
-    <div className={DIFF_LINE_WRAP}>
+    <div className={DIFF_LINE_WRAP} data-line-number={newLine}>
       <span className="w-5 shrink-0" aria-hidden="true" />
-      <span className={lineNumberClasses(false)}>{oldLine}</span>
-      <span className={lineNumberClasses(false)}>{newLine}</span>
+      <span className={lineNumberClasses(false)}>{lineLabel(oldLine)}</span>
+      <span className={lineNumberClasses(false)}>{lineLabel(newLine)}</span>
       <span className="w-4 shrink-0" aria-hidden="true" />
       {code}
     </div>
@@ -106,14 +120,15 @@ function ExpandButton({
 }
 
 /**
- * The omitted lines between two hunks.
+ * A run of file the diff does not show: between two hunks, or — for hosts that
+ * can read file text — above the first hunk and below the last.
  *
  * With a host that can read file text (`fileLines`) this expands in place, a
  * chunk at a time from either end, the way GitHub does. Hosts without it —
  * where there is no file to read, only a URL — keep the old behaviour of
  * linking out to the file at that line.
  */
-export function HunkGapPlaceholder({ filePath, gap }: HunkGapPlaceholderProps) {
+export function HunkGapPlaceholder({ filePath, gap, onExpandedChange }: HunkGapPlaceholderProps) {
   const host = useReviewHost();
   const prContext = useReviewStore((s) => s.prContext);
   const split = useReviewStore((s) => s.diffViewMode) === "split";
@@ -171,6 +186,14 @@ export function HunkGapPlaceholder({ filePath, gap }: HunkGapPlaceholderProps) {
   const hiddenStart = gap.afterNewLine + 1 + top.length;
   const hiddenEnd = gap.beforeNewLine - 1 - bottom.length;
 
+  // Callers pass a stable callback; the cleanup keeps the file card honest
+  // when this gap unmounts (view mode switch, collapse-all remount).
+  const expanded = top.length + bottom.length > 0;
+  useEffect(() => {
+    onExpandedChange?.(gap.key, expanded);
+    return () => onExpandedChange?.(gap.key, false);
+  }, [onExpandedChange, gap.key, expanded]);
+
   // Highlight each revealed run as one block so multi-line constructs tokenize.
   const highlight = (lines: string[]): (string | null)[] =>
     language ? highlightToLines(lines.join("\n"), language) : lines.map(() => null);
@@ -225,7 +248,7 @@ export function HunkGapPlaceholder({ filePath, gap }: HunkGapPlaceholderProps) {
               <>
                 <ExpandButton
                   label="↓"
-                  title={`Show ${CHUNK} more lines below line ${hiddenStart - 1}`}
+                  title={`Show ${CHUNK} more lines from line ${hiddenStart}`}
                   busy={busy}
                   testId="hunk-gap-expand-down"
                   onClick={() => void reveal(hiddenStart, hiddenStart + CHUNK - 1, "top")}
@@ -233,7 +256,7 @@ export function HunkGapPlaceholder({ filePath, gap }: HunkGapPlaceholderProps) {
                 <span aria-hidden="true">{hidden} hidden lines</span>
                 <ExpandButton
                   label="↑"
-                  title={`Show ${CHUNK} more lines above line ${hiddenEnd + 1}`}
+                  title={`Show ${CHUNK} more lines up to line ${hiddenEnd}`}
                   busy={busy}
                   testId="hunk-gap-expand-up"
                   onClick={() => void reveal(hiddenEnd - CHUNK + 1, hiddenEnd, "bottom")}

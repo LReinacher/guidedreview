@@ -30,6 +30,11 @@ import { getConfirmationDialogElement, isConfirmationOpen } from "@guided-review
 import type { SelectableLine } from "./commentTypes";
 import type { DiffViewMode } from "./diffView";
 import { trapTabKey } from "./focusTrap";
+import {
+  closeDefinitionPreview,
+  getDefinitionPreviewElement,
+  isDefinitionPreviewOpen,
+} from "./useSymbolNavigation";
 import { useReviewStore } from "./store";
 
 /** Max span (ms) from arming `v` to the second key (`u` / `s`). */
@@ -105,6 +110,11 @@ function editableTextValue(el: HTMLElement): string {
     return el.value;
   }
   return el.innerText ?? "";
+}
+
+/** A bare modifier press, which never means "act" on its own. */
+function isModifierKey(event: KeyboardEvent): boolean {
+  return ["Meta", "Control", "Shift", "Alt"].includes(event.key);
 }
 
 interface UseOverlayKeyboardOptions {
@@ -248,13 +258,16 @@ export function useOverlayKeyboard({
     function handleTabTrap(event: KeyboardEvent): boolean {
       if (event.key !== "Tab") return false;
       const confirmDialog = getConfirmationDialogElement();
+      const definitionPreview = getDefinitionPreviewElement();
       const trapRoot = confirmDialog
         ? confirmDialog
-        : submitReviewOpenRef.current
-          ? submitModalDialogRef.current
-          : generatePromptOpenRef.current
-            ? generatePromptDialogRef.current
-            : overlayRef.current;
+        : definitionPreview
+          ? definitionPreview
+          : submitReviewOpenRef.current
+            ? submitModalDialogRef.current
+            : generatePromptOpenRef.current
+              ? generatePromptDialogRef.current
+              : overlayRef.current;
       if (trapRoot) trapTabKey(event, trapRoot);
       return true;
     }
@@ -269,6 +282,17 @@ export function useOverlayKeyboard({
       // It runs Enter/Esc from its own capture listener, so we only need to stop
       // the key here before it reaches the other modals or navigate mode.
       if (isConfirmationOpen()) return true;
+
+      // The declaration preview is a popover, not a modal: it owns Esc, and any
+      // other key dismisses it and then means what it always means. Modifier
+      // keys are exempt so holding ⌘ to line up the next symbol keeps the card.
+      if (isDefinitionPreviewOpen() && !isModifierKey(event)) {
+        closeDefinitionPreview();
+        if (event.key === "Escape") {
+          event.preventDefault();
+          return true;
+        }
+      }
 
       // Success modal: Enter / Esc exit the review (single CTA dialog).
       if (submitSuccessRef.current) {

@@ -4,10 +4,12 @@ import type {
   ReviewHost,
   ReviewSubmitTarget,
   StreamPlanHandlers,
+  SymbolDefinition,
 } from "@guided-review/ui/review/host";
 import type { DiffViewMode } from "@guided-review/ui/review/diffView";
 import type { GitHubStatusPayload } from "../server/createServer";
 import { ConnectGitHubDialog } from "./ConnectGitHubDialog";
+import { sourceViewUrl } from "./routes";
 
 /**
  * Coalesce session writes. The overlay re-persists on every unit change and
@@ -43,19 +45,27 @@ function createSessionWriter() {
     });
   }
 
-  return (key: string, state: unknown): Promise<void> => {
-    pending = { key, state };
-    if (timer) clearTimeout(timer);
-    return new Promise((resolve, reject) => {
-      timer = setTimeout(() => {
-        flush().then(resolve, reject);
-      }, PERSIST_DEBOUNCE_MS);
-    });
+  return {
+    write(key: string, state: unknown): Promise<void> {
+      pending = { key, state };
+      if (timer) clearTimeout(timer);
+      return new Promise((resolve, reject) => {
+        timer = setTimeout(() => {
+          flush().then(resolve, reject);
+        }, PERSIST_DEBOUNCE_MS);
+      });
+    },
+    /** Forget a queued write, so a discarded review cannot land after it. */
+    cancel(): void {
+      if (timer) clearTimeout(timer);
+      timer = undefined;
+      pending = null;
+    },
   };
 }
 
 /** One writer per page: the host is rebuilt when GitHub status lands. */
-const writeSession = createSessionWriter();
+const sessionWriter = createSessionWriter();
 
 async function readGitHubStatus(): Promise<GitHubStatusPayload | null> {
   try {
@@ -85,7 +95,13 @@ export function createLocalReviewHost(options: {
     // Reviews live in the git dir, not the tab: restarting the CLI after a
     // crash resumes the same structure, position, and comments.
     persistPartialSessions: true,
-    persistSession: (key, state) => writeSession(key, state),
+    persistSession: (key, state) => sessionWriter.write(key, state),
+    clearSession: async (key) => {
+      // Drop any queued write first, or the debounce would put the discarded
+      // review straight back on disk.
+      sessionWriter.cancel();
+      await fetch(`/api/review-state?key=${encodeURIComponent(key)}`, { method: "DELETE" });
+    },
     restoreSession: async (key) => {
       const res = await fetch(`/api/review-state?key=${encodeURIComponent(key)}`);
       if (!res.ok) return null;
@@ -159,6 +175,28 @@ export function createLocalReviewHost(options: {
       const data = (await res.json()) as { lines?: string[] };
       return data.lines ?? null;
     },
+    // Lets the diff be extended past its last hunk: without the file's length
+    // there is no way to know whether anything follows it.
+    fileLineCount: async ({ path, side }) => {
+      const params = new URLSearchParams({ path, side });
+      const res = await fetch(`/api/file-line-count?${params.toString()}`);
+      if (!res.ok) return null;
+      const data = (await res.json()) as { totalLines?: number };
+      return data.totalLines ?? null;
+    },
+    // Command-clicking a symbol searches the whole repo, not just the diff:
+    // most definitions a reviewer chases are in files the branch never touched.
+    findDefinition: async ({ symbol, fromPath, fromLine }) => {
+      const params = new URLSearchParams({ symbol, path: fromPath });
+      if (fromLine) params.set("line", String(fromLine));
+      const res = await fetch(`/api/definition?${params.toString()}`);
+      if (!res.ok) throw new Error("The local review server could not search for that symbol.");
+      const data = (await res.json()) as { definitions?: SymbolDefinition[] };
+      return data.definitions ?? [];
+    },
+    // There is no forge to link to locally, so a file link opens the CLI's own
+    // source viewer in a new tab.
+    fileLineUrl: async (filePath, line) => sourceViewUrl(filePath, line),
     // Offered as soon as the branch has a pull request to post to. Missing or
     // rejected credentials are a step inside the flow (the connect dialog),
     // not a reason to hide it. With no PR at all there is nothing to submit to

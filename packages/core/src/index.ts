@@ -78,5 +78,17 @@ export type {
 export { EMPTY_REVIEW_BODY_MESSAGE } from "./github/types";
 export { submitPullRequestReview } from "./github/submitReview";
 
+export {
+  createDeclarationMatcher,
+  declarationKind,
+  isSymbolName,
+  symbolFileExtensions,
+  symbolKindRank,
+  symbolLanguageForPath,
+} from "./symbols/declarations";
+export type { SymbolKind, SymbolLanguage } from "./symbols/declarations";
+export { resolveLocalBinding } from "./symbols/localScope";
+export type { LocalBinding, LocalBindingRequest } from "./symbols/localScope";
+
 export { formatNotesMarkdown } from "./notes/formatNotes";
 export { formatAgentPrompt } from "./notes/formatAgentPrompt";

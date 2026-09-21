@@ -137,6 +137,11 @@ export function highlightHunkLines(
   });
 }
 
+/**
+ * One line of code text. `data-code-text` is the hook command-click uses to
+ * find the line's text under the pointer — every rendered code line must carry
+ * it, or go-to-definition silently stops working on that row.
+ */
 export function CodeContent({
   content,
   highlighted,
@@ -145,9 +150,9 @@ export function CodeContent({
   highlighted: string | null;
 }) {
   if (highlighted != null) {
-    return <span dangerouslySetInnerHTML={{ __html: highlighted }} />;
+    return <span data-code-text="" dangerouslySetInnerHTML={{ __html: highlighted }} />;
   }
-  return <span>{content}</span>;
+  return <span data-code-text="">{content}</span>;
 }
 
 interface LineExtrasProps {

@@ -19,6 +19,7 @@ import { findUnitForFile, type DiffSearchResult, type SearchScrollTarget } from 
 import { ProgressHeader } from "@guided-review/ui/review/components/ProgressHeader";
 import { Sidebar } from "@guided-review/ui/review/components/Sidebar";
 import { DiffPane } from "@guided-review/ui/review/components/DiffPane";
+import type { DefinitionJumpTarget } from "@guided-review/ui/review/components/diff/DefinitionPreview";
 import { DescriptionPane } from "@guided-review/ui/review/components/DescriptionPane";
 import { ContextPanel } from "@guided-review/ui/review/components/ContextPanel";
 import { FooterNav } from "@guided-review/ui/review/components/FooterNav";
@@ -140,16 +141,25 @@ export function Overlay({
     setDiffSearchOpen(false);
   }
 
-  function handleDiffSearchSelect(result: DiffSearchResult) {
-    const hunkId = result.kind === "line" ? result.hunkId : undefined;
-    const unitIndex = findUnitForFile(plan, result.filePath, hunkId);
+  /**
+   * Put the reader on one line of the diff, switching review unit first when
+   * the line lives in another one. Shared by diff search and by jumping to a
+   * declaration found in the review.
+   */
+  function jumpToDiffLine(target: DefinitionJumpTarget) {
+    const unitIndex = findUnitForFile(plan, target.filePath, target.hunkId);
     if (unitIndex !== null && unitIndex !== currentUnitIndex) {
       skipCodeScrollOnUnitChange.current = true;
       goToUnit(unitIndex);
     }
-    setSearchScrollTarget({
+    setSearchScrollTarget({ filePath: target.filePath, lineId: target.lineId });
+  }
+
+  function handleDiffSearchSelect(result: DiffSearchResult) {
+    jumpToDiffLine({
       filePath: result.filePath,
       lineId: result.kind === "line" ? result.id : undefined,
+      hunkId: result.kind === "line" ? result.hunkId : undefined,
     });
     setDiffSearchOpen(false);
   }
@@ -195,6 +205,43 @@ export function Overlay({
   function handleExit() {
     onRequestClose?.();
     close();
+  }
+
+  /**
+   * Build the structure, or rebuild one that already exists. A rebuild throws
+   * away a plan the user may have paid for, so it asks first — but it keeps
+   * their comments, which is the part worth saying out loud.
+   */
+  function requestStructureReview() {
+    if (!localDiff) return;
+    if (!localDiff.structured) {
+      localDiff.onStructureReview();
+      return;
+    }
+    confirm({
+      title: "Rebuild the Structure?",
+      body: "The current units are replaced by a fresh pass over the same diff. Your comments are kept.",
+      okButtonText: "Rebuild",
+      cancelButtonText: "Cancel",
+      okButtonHandler: () => {
+        localDiff.onStructureReview();
+      },
+    });
+  }
+
+  /** Throw the saved review away — structure, position, and comments. */
+  function requestStartOver() {
+    if (!localDiff?.onStartOver) return;
+    confirm({
+      title: "Start This Review Over?",
+      body: "The saved structure and every comment on this diff are discarded. This cannot be undone.",
+      variant: "destructive",
+      okButtonText: "Start Over",
+      cancelButtonText: "Cancel",
+      okButtonHandler: () => {
+        localDiff.onStartOver?.();
+      },
+    });
   }
 
   /** Esc (and Exit button) — confirm before leaving the review. */
@@ -364,10 +411,7 @@ export function Overlay({
       localDiff && localDiff.scopes.length > 0
         ? () => scopeSelectRef.current?.focusAndOpen()
         : undefined,
-    structureReview:
-      localDiff && !localDiff.structured && !localDiff.structuring
-        ? localDiff.onStructureReview
-        : undefined,
+    structureReview: localDiff && !localDiff.structuring ? requestStructureReview : undefined,
     openSettings: host.kind === "local" ? () => host.connectProvider() : undefined,
   });
 
@@ -454,6 +498,7 @@ export function Overlay({
                 selectableForUnit={selectableForUnit}
                 searchScrollTarget={searchScrollTarget}
                 onSearchScrollTargetConsumed={clearSearchScrollTarget}
+                onJumpToDiffLine={jumpToDiffLine}
               />
             )}
           </div>
@@ -480,8 +525,14 @@ export function Overlay({
                 loading={showBuildingSpinner && isDescriptionUnit}
                 loadingDetail={showBuildingSpinner && isDescriptionUnit ? loadingDetail : null}
                 onRetry={status === "error" ? onRetry : undefined}
-                onStructureReview={
-                  localDiff && !localDiff.structured ? localDiff.onStructureReview : undefined
+                onStructureReview={localDiff ? requestStructureReview : undefined}
+                // Only worth offering when there is something to throw away.
+                onStartOver={
+                  localDiff?.onStartOver &&
+                  (localDiff.structured || draftComments.length > 0) &&
+                  !localDiff.structuring
+                    ? requestStartOver
+                    : undefined
                 }
                 structured={localDiff?.structured}
                 structureWith={localDiff?.structureWith}

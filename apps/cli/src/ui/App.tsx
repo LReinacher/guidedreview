@@ -6,25 +6,18 @@ import { ReviewHostProvider } from "@guided-review/ui/review/host";
 import { restoreSession, useReviewStore } from "@guided-review/ui/review/store";
 import type { LocalDiffControls } from "@guided-review/ui/review/localReview";
 import { createLocalReviewHost } from "./host";
+import { parseAppHash, type AppRouteName } from "./routes";
 import { codingAgentLabel, structureWithLabel } from "./codingAgentLabel";
 import { SettingsApp } from "./settings/SettingsApp";
 import type { PublicSettings } from "./settings/Settings";
 
-type AppRoute = "review" | "settings" | "about";
-
-function parseAppHash(hash: string): AppRoute {
-  const path = hash.replace(/^#\/?/, "").toLowerCase();
-  if (path === "settings" || path === "about") return path;
-  return "review";
-}
-
-function useHashRoute(): AppRoute {
-  const [route, setRoute] = useState<AppRoute>(() =>
-    typeof window !== "undefined" ? parseAppHash(window.location.hash) : "review",
+function useHashRoute(): AppRouteName {
+  const [route, setRoute] = useState<AppRouteName>(() =>
+    typeof window !== "undefined" ? parseAppHash(window.location.hash).name : "review",
   );
 
   useEffect(() => {
-    const onHashChange = () => setRoute(parseAppHash(window.location.hash));
+    const onHashChange = () => setRoute(parseAppHash(window.location.hash).name);
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
@@ -232,6 +225,33 @@ export function App() {
     }
   }
 
+  /**
+   * Throw the saved review away and begin the same diff again: no structure,
+   * no comments, back to one unit per file.
+   */
+  async function startOver(): Promise<void> {
+    if (scopeBusy) return;
+    setScopeBusy(true);
+    cancelStreamRef.current?.();
+    cancelStreamRef.current = undefined;
+    try {
+      const key = useReviewStore.getState().sessionKey;
+      if (key) await host.clearSession?.(key);
+      const res = await fetch("/api/session");
+      if (!res.ok) throw new Error(`Could not reload the review (${res.status}).`);
+      const session = (await res.json()) as ReviewSessionPayload;
+      applyMeta(session);
+      // bootReady drops the drafts along with the plan — that is the point.
+      installFilePlan(session);
+      setStale(false);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Could not start the review over.";
+      useReviewStore.getState().setError(message);
+    } finally {
+      setScopeBusy(false);
+    }
+  }
+
   async function selectScope(scope: string) {
     if (scope === selectedScope || scopeBusy) return;
     setScopeBusy(true);
@@ -300,6 +320,9 @@ export function App() {
       void selectScope(id);
     },
     onStructureReview: startStructure,
+    onStartOver: () => {
+      void startOver();
+    },
     structuring,
     structured,
     scopeBusy,

@@ -13,7 +13,7 @@ export interface LocalDiffOptions {
   scope?: DiffScopeId;
 }
 
-export type DiffScopeId = "branch" | "uncommitted" | "unstaged" | `commit:${string}`;
+export type DiffScopeId = "everything" | "branch" | "uncommitted" | "unstaged" | `commit:${string}`;
 
 export interface DiffStat {
   files: number;
@@ -71,6 +71,7 @@ const MAX_RECENT_COMMITS = 5;
 
 export function isDiffScopeId(value: string): value is DiffScopeId {
   return (
+    value === "everything" ||
     value === "branch" ||
     value === "uncommitted" ||
     value === "unstaged" ||
@@ -189,7 +190,9 @@ function formatCommitsForPrompt(commits: LocalCommit[], selected: DiffScopeId): 
         .join("\n\n"),
     );
   }
-  if (selected === "uncommitted") {
+  if (selected === "everything") {
+    parts.push("Reviewing committed, staged, and unstaged work on this branch together.");
+  } else if (selected === "uncommitted") {
     parts.push("Working tree has uncommitted changes.");
   } else if (selected === "unstaged") {
     parts.push("Reviewing unstaged changes only.");
@@ -231,6 +234,11 @@ function gitForScope(
 ): { sha: string } | { range: string[]; includeUntracked: boolean } {
   const sha = commitShaFromScope(scope);
   if (sha) return { sha };
+  // Merge base against the working tree, so commits, index, and unstaged edits
+  // all land in one diff.
+  if (scope === "everything") {
+    return { range: [repo.mergeBase], includeUntracked: repo.includeUntracked };
+  }
   if (scope === "branch") return { range: [repo.mergeBase, "HEAD"], includeUntracked: false };
   if (scope === "unstaged") return { range: [], includeUntracked: false };
   if (repo.staged) return { range: ["--cached", "HEAD"], includeUntracked: false };
@@ -310,6 +318,7 @@ async function buildScopes(
       statForScope(repo, "branch", untrackedCount),
       statForScope(repo, "uncommitted", untrackedCount),
       statForScope(repo, "unstaged", untrackedCount),
+      statForScope(repo, "everything", untrackedCount),
     ]),
     countCommitsAhead(repo),
     Promise.all(
@@ -318,7 +327,7 @@ async function buildScopes(
       ),
     ),
   ]);
-  const [branchStat, uncommittedStat, unstagedStat] = workingTreeStats;
+  const [branchStat, uncommittedStat, unstagedStat, everythingStat] = workingTreeStats;
 
   const commitExtra = `${commitCount} commit${commitCount === 1 ? "" : "s"}`;
 
@@ -351,6 +360,20 @@ async function buildScopes(
       empty: unstagedStat.files === 0,
     },
   ];
+
+  // Only worth its own row when it is actually a combination — with a clean
+  // tree it is the branch scope, and with no commits it is the uncommitted one.
+  if (branchStat.files > 0 && uncommittedStat.files > 0) {
+    scopes.unshift({
+      id: "everything",
+      label: `Everything on ${headLabel}`,
+      description: `Committed, staged, and unstaged work versus ${repo.baseRef}, in one diff.`,
+      meta: formatScopeMeta(everythingStat, commitExtra),
+      metaPrefix: commitExtra,
+      stat: everythingStat,
+      empty: everythingStat.files === 0,
+    });
+  }
 
   recent.forEach((commit, index) => {
     const stat = commitStats[index]!;
@@ -435,10 +458,12 @@ async function snapshotFrom(
   const untracked = repo.includeUntracked && !repo.staged ? await listUntracked(repo.repoRoot) : [];
   const commits = await listCommits(repo);
   const scopes = await buildScopes(repo, commits, untracked);
-  const selected = requested ?? pickDefaultScope(scopes, repo.staged);
-  if (requested && !scopes.some((option) => option.id === requested)) {
-    throw new GitError(`Unknown diff scope "${requested}".`);
-  }
+  // A scope can stop being offered while a review is open: a commit ages out
+  // of the recent list, or the combined scope collapses once the tree is
+  // clean. Falling back beats stranding the session on a scope that is gone —
+  // callers that need the exact one compare `selectedScope` afterwards.
+  const offered = requested && scopes.some((option) => option.id === requested);
+  const selected = offered ? requested! : pickDefaultScope(scopes, repo.staged);
   const raw = await rawDiffForScope(repo, selected, untracked);
   const diff = parseDiff(raw);
   return {

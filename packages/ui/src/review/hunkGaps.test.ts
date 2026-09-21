@@ -111,6 +111,33 @@ describe("withHunkGaps", () => {
     ]);
   });
 
+  it("marks the file's own edges only when asked", () => {
+    const only = hunk({ id: "f#0", newStart: 21, newLines: 3, oldStart: 21, oldLines: 2 });
+    expect(withHunkGaps([only])).toEqual([{ kind: "hunk", hunk: only }]);
+    expect(withHunkGaps([only], { fileEdges: true })).toEqual([
+      {
+        kind: "gap",
+        key: "gap-top-f#0",
+        afterOldLine: 0,
+        afterNewLine: 0,
+        beforeOldLine: 21,
+        beforeNewLine: 21,
+        size: 20,
+      },
+      { kind: "hunk", hunk: only },
+      // How much file is left below is unknown until the host is asked.
+      { kind: "tail", key: "gap-end-f#0", afterOldLine: 22, afterNewLine: 23 },
+    ]);
+  });
+
+  it("has no gap above a hunk that already starts at line 1", () => {
+    const first = hunk({ id: "f#0", newStart: 1, newLines: 3, oldStart: 1, oldLines: 3 });
+    expect(withHunkGaps([first], { fileEdges: true })).toEqual([
+      { kind: "hunk", hunk: first },
+      { kind: "tail", key: "gap-end-f#0", afterOldLine: 3, afterNewLine: 3 },
+    ]);
+  });
+
   it("inserts a gap when a unit skips an intermediate hunk", () => {
     const first = hunk({ id: "f#0", newStart: 1, newLines: 3, oldStart: 1, oldLines: 3 });
     const third = hunk({ id: "f#2", newStart: 40, newLines: 5, oldStart: 38, oldLines: 5 });

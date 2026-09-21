@@ -21,6 +21,7 @@ import type {
   SubmitReviewResponse,
 } from "@guided-review/ui/review/types";
 import type { ReviewCommentInput, ReviewEvent } from "@guided-review/ui/review/types";
+import type { SymbolKind } from "@guided-review/core";
 import type { DiffViewMode } from "./diffView";
 import type { DraftComment } from "./commentTypes";
 
@@ -93,6 +94,44 @@ export interface FileLinesRequest {
   context: ReviewContext;
 }
 
+export interface FileLineCountRequest {
+  path: string;
+  side: FilePreviewSide;
+  context: ReviewContext;
+}
+
+/** One command-clicked identifier the overlay wants a declaration for. */
+export interface SymbolDefinitionRequest {
+  symbol: string;
+  /** File the click came from: picks the language and ranks nearby files first. */
+  fromPath: string;
+  /**
+   * 1-indexed line the click was on, when the overlay knows it. Hosts that can
+   * read the file use it to resolve local scope — a parameter or a local
+   * beats a same-named declaration anywhere else.
+   */
+  fromLine?: number;
+  context: ReviewContext;
+}
+
+/** A declaration the host found, ready to preview without another round trip. */
+export interface SymbolDefinition {
+  path: string;
+  /** 1-indexed line the declaration starts on. */
+  line: number;
+  kind: SymbolKind | null;
+  /** The declaration and a few lines after it. */
+  snippet: string[];
+  /** 1-indexed file line of `snippet[0]`. */
+  snippetStartLine: number;
+  /**
+   * Set only when the declaration is inside the reviewed diff, in which case
+   * the overlay can jump to it in place instead of opening the file.
+   */
+  diffLineId?: string;
+  hunkId?: string;
+}
+
 export interface ReviewHost {
   kind: "github" | "local";
   /** Marketing demo controls. The underlying kind still drives the real host UI. */
@@ -110,6 +149,12 @@ export interface ReviewHost {
    * all a browser session needs to avoid a repeat provider call.
    */
   persistPartialSessions?: boolean;
+  /**
+   * Drop a saved review. Only hosts that persist durably need this — it is
+   * what "start over" calls so the discarded review cannot come back on the
+   * next run.
+   */
+  clearSession?(key: string): Promise<void>;
   streamPlan(
     diff: ParsedDiff,
     context: ReviewContext,
@@ -132,6 +177,18 @@ export interface ReviewHost {
    * `fileLineUrl` (GitHub opens the file at that line instead).
    */
   fileLines?(request: FileLinesRequest): Promise<string[] | null>;
+  /**
+   * How many lines one side of a file has. Only the end of the file needs it:
+   * the patch says nothing about what follows the last hunk, so without a
+   * count the overlay cannot tell "20 more lines below" from "end of file".
+   */
+  fileLineCount?(request: FileLineCountRequest): Promise<number | null>;
+  /**
+   * Declarations of `symbol` anywhere the host can see — the repo for the CLI.
+   * Hosts without a filesystem omit it, and go-to-definition falls back to the
+   * declarations inside the reviewed diff.
+   */
+  findDefinition?(request: SymbolDefinitionRequest): Promise<SymbolDefinition[]>;
   submit?: ReviewHostSubmit;
   /**
    * Enables Generate Prompt. With submit it is a secondary action;

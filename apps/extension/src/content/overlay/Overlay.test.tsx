@@ -521,12 +521,17 @@ describe("Overlay", () => {
       expect(connectProvider).toHaveBeenCalledTimes(2);
     });
 
-    it("does not structure after the review is already structured", () => {
+    it("confirms before rebuilding a structure that already exists", () => {
       const { onStructureReview } = renderLocalOverlay({ structured: true });
 
-      expect(screen.queryByTestId("structure-review")).not.toBeInTheDocument();
+      expect(screen.getByTestId("structure-review")).toHaveTextContent("Rebuild Structure");
+      // A rebuild costs another provider call, so ⌘I asks rather than firing.
       fireEvent.keyDown(window, { key: "i", metaKey: true });
       expect(onStructureReview).not.toHaveBeenCalled();
+      expect(screen.getByTestId("confirmation-dialog")).toHaveTextContent("Rebuild");
+
+      fireEvent.click(screen.getByTestId("confirmation-ok"));
+      expect(onStructureReview).toHaveBeenCalledTimes(1);
     });
 
     it("does not bind local shortcuts on a GitHub review", () => {

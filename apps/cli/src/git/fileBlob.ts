@@ -2,7 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { imageMimeType, isImagePath } from "@guided-review/core";
 import type { DiffFile } from "@guided-review/core";
-import { GitError, runGitBuffer } from "./run";
+import { GitError, runGit, runGitBuffer } from "./run";
 import type { DiffScopeId, LocalReviewSnapshot } from "./localDiff";
 
 /** Cap for any blob we read out of git or the worktree, image or text. */
@@ -120,17 +120,84 @@ async function readNew(snapshot: LocalReviewSnapshot, file: DiffFile): Promise<B
   return readWorktree(repo.repoRoot, blobPath);
 }
 
+/** Most lines the file viewer or a snippet read will return from one file. */
+export const MAX_SOURCE_LINES = 20000;
+
+/**
+ * Text of a file in the worktree, as lines, for symbol lookup and the file
+ * viewer. Unlike the diff-scoped readers above this can reach any file git
+ * tracks — following a symbol out of the diff is the whole point — so it is
+ * fenced by the same path-traversal guard plus a tracked-file check.
+ */
+export async function readWorktreeTextFile(
+  repoRoot: string,
+  filePath: string,
+  maxLines: number = MAX_SOURCE_LINES,
+): Promise<{ lines: string[]; truncated: boolean } | null> {
+  const bytes = await readWorktree(repoRoot, filePath);
+  if (!bytes || looksBinary(bytes)) return null;
+
+  const lines = bytes.toString("utf8").split("\n");
+  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  const truncated = lines.length > maxLines;
+  return {
+    lines: (truncated ? lines.slice(0, maxLines) : lines).map((line) =>
+      line.endsWith("\r") ? line.slice(0, -1) : line,
+    ),
+    truncated,
+  };
+}
+
+/**
+ * Is `filePath` a file git knows about (tracked, or untracked but not ignored)?
+ * The file viewer serves only these, so an ignored `.env` sitting next to the
+ * code never becomes readable over the local HTTP server.
+ */
+export async function isReadablePath(repoRoot: string, filePath: string): Promise<boolean> {
+  if (!resolveWorktreePath(repoRoot, filePath)) return false;
+  try {
+    const listed = await runGit(
+      ["ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", filePath],
+      repoRoot,
+    );
+    return listed.split("\0").some((entry) => entry === filePath);
+  } catch {
+    return false;
+  }
+}
+
 /** Heuristic: a NUL byte near the start means this is not text worth rendering. */
 function looksBinary(bytes: Buffer): boolean {
   return bytes.subarray(0, 8000).includes(0);
 }
 
 /**
+ * Every text line of one side of a file in the current snapshot, or null when
+ * there is nothing readable there. Only files in the parsed diff are readable,
+ * so the API can never be pointed at an arbitrary path.
+ */
+async function readTextLines(
+  snapshot: LocalReviewSnapshot,
+  filePath: string,
+  side: FilePreviewSide,
+): Promise<string[] | null> {
+  const file = snapshot.diff.files.find((entry) => entry.path === filePath);
+  if (!file || file.isBinaryOrElided || isImagePath(file.path)) return null;
+
+  const bytes = side === "old" ? await readOld(snapshot, file) : await readNew(snapshot, file);
+  if (!bytes || bytes.byteLength > MAX_BLOB_BYTES || looksBinary(bytes)) return null;
+
+  const lines = bytes.toString("utf8").split("\n");
+  // A trailing newline leaves a final empty element that is not a real line.
+  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  return lines.map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
+}
+
+/**
  * Text lines `[startLine, endLine]` (1-indexed, inclusive) from one side of a
  * file in the current snapshot — the context the overlay reveals when the user
- * expands a collapsed gap between hunks. Only files in the parsed diff are
- * readable, and the range is capped so one click cannot pull a whole monorepo
- * file across the wire.
+ * expands a collapsed gap or extends a diff past its last hunk. The range is
+ * capped so one click cannot pull a whole monorepo file across the wire.
  */
 export async function readReviewFileLines(
   snapshot: LocalReviewSnapshot,
@@ -139,19 +206,24 @@ export async function readReviewFileLines(
   startLine: number,
   endLine: number,
 ): Promise<string[] | null> {
-  const file = snapshot.diff.files.find((entry) => entry.path === filePath);
-  if (!file || file.isBinaryOrElided || isImagePath(file.path)) return null;
   if (startLine < 1 || endLine < startLine) return null;
   if (endLine - startLine + 1 > MAX_CONTEXT_LINES) return null;
 
-  const bytes = side === "old" ? await readOld(snapshot, file) : await readNew(snapshot, file);
-  if (!bytes || bytes.byteLength > MAX_BLOB_BYTES || looksBinary(bytes)) return null;
+  const lines = await readTextLines(snapshot, filePath, side);
+  if (!lines) return null;
+  return lines.slice(startLine - 1, Math.min(endLine, lines.length));
+}
 
-  const lines = bytes.toString("utf8").split("\n");
-  // A trailing newline leaves a final empty element that is not a real line.
-  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
-  if (startLine > lines.length) return [];
-  return lines
-    .slice(startLine - 1, Math.min(endLine, lines.length))
-    .map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
+/**
+ * How many lines one side of a file has. The overlay asks before offering to
+ * extend a diff downwards: the patch ends at its last hunk and says nothing
+ * about whether any file is left under it.
+ */
+export async function readReviewFileLineCount(
+  snapshot: LocalReviewSnapshot,
+  filePath: string,
+  side: FilePreviewSide,
+): Promise<number | null> {
+  const lines = await readTextLines(snapshot, filePath, side);
+  return lines ? lines.length : null;
 }

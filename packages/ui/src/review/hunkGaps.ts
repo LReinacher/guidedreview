@@ -39,7 +39,29 @@ export interface HunkGap {
   size: number;
 }
 
-export type HunkSequenceItem = { kind: "hunk"; hunk: DiffHunk } | HunkGap;
+/**
+ * The rest of the file below the last displayed hunk. Unlike a gap it has no
+ * hunk under it to bound it, so how much is left — if anything — is only known
+ * once the host has been asked how long the file is.
+ */
+export interface FileTail {
+  kind: "tail";
+  key: string;
+  /** Last line of the hunk above, per side. */
+  afterOldLine: number;
+  afterNewLine: number;
+}
+
+export type HunkSequenceItem = { kind: "hunk"; hunk: DiffHunk } | HunkGap | FileTail;
+
+export interface HunkGapOptions {
+  /**
+   * Also mark the runs of file before the first hunk and after the last, so a
+   * diff can be extended past the patch's own context. Off for hosts that
+   * cannot read file text — there is nothing they could reveal.
+   */
+  fileEdges?: boolean;
+}
 
 /** Last line of a hunk on one side; `start - 1` when the side is empty. */
 function endOf(start: number, count: number): number {
@@ -63,10 +85,30 @@ function gapBetween(prev: DiffHunk, next: DiffHunk): HunkGap | null {
 }
 
 /**
+ * The lines above the first hunk, as a gap anchored at line 0. Deletion-only
+ * hunks have no new-side position to count back from, so they get none.
+ */
+function gapAboveFirst(first: DiffHunk): HunkGap | null {
+  if (first.newLines <= 0 || first.newStart <= 1) return null;
+  return {
+    kind: "gap",
+    key: `gap-top-${first.id}`,
+    afterOldLine: 0,
+    afterNewLine: 0,
+    beforeOldLine: first.oldStart,
+    beforeNewLine: first.newStart,
+    size: first.newStart - 1,
+  };
+}
+
+/**
  * Interleave displayed hunks with gap markers for rendering.
  * Only inserts a gap between consecutive items in the displayed list.
  */
-export function withHunkGaps(hunks: DiffHunk[]): HunkSequenceItem[] {
+export function withHunkGaps(
+  hunks: DiffHunk[],
+  { fileEdges = false }: HunkGapOptions = {},
+): HunkSequenceItem[] {
   const out: HunkSequenceItem[] = [];
   for (let i = 0; i < hunks.length; i++) {
     const hunk = hunks[i];
@@ -78,6 +120,21 @@ export function withHunkGaps(hunks: DiffHunk[]): HunkSequenceItem[] {
       }
     }
     out.push({ kind: "hunk", hunk });
+  }
+
+  const first = hunks[0];
+  const last = hunks[hunks.length - 1];
+  if (!fileEdges || !first || !last) return out;
+
+  const above = gapAboveFirst(first);
+  if (above) out.unshift(above);
+  if (last.newLines > 0) {
+    out.push({
+      kind: "tail",
+      key: `gap-end-${last.id}`,
+      afterOldLine: endOf(last.oldStart, last.oldLines),
+      afterNewLine: endOf(last.newStart, last.newLines),
+    });
   }
   return out;
 }

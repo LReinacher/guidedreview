@@ -73,7 +73,7 @@ Narrative version: [Connect GitHub → Private repos and org SSO](/docs/connect-
 ## Session and resume
 
 - **Extension:** Active plans live in `chrome.storage.session`, keyed by `owner/repo#number`. Switching Conversation ↔ Files changed should resume the same step ([Your first review → Resume later](/docs/first-review#resume-later)). Closing the browser (or ending the session) clears the plan. Settings and API keys in local storage remain ([Privacy & data](/docs/privacy-and-data#what-stays-local)).
-- **CLI:** Reviews are saved under `.git/guided-review/sessions` in the repo, keyed by base, branch, and scope. Stopping the process (Ctrl+C) or losing it to a crash does not end the review — restarting `npx @guided-review/cli` resumes the same structure, step, and comments. Deleting that directory starts over.
+- **CLI:** Reviews are saved under `.git/guided-review/sessions` in the repo, keyed by base, branch, and scope. Stopping the process (Ctrl+C) or losing it to a crash does not end the review — restarting `npx @guided-review/cli` resumes the same structure, step, and comments. **Start Over** on the Change summary card discards one review; deleting that directory discards them all.
 - If the diff on disk moved on since the review was saved, the overlay says so; **Refresh** loads the new diff and keeps your comments.
 - Starting Guided Review again after a clear rebuilds a **new** plan for the current diff ([How a review plan works](/docs/how-it-works)).
 

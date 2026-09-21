@@ -6,6 +6,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import {
   annotateReview,
   describeErrorMessage,
+  isSymbolName,
   submitPullRequestReview,
   type AnnotateReviewStreamEvent,
   type ProviderSettings,
@@ -38,7 +39,15 @@ import {
   type LocalCommit,
   type LocalReviewSnapshot,
 } from "../git/localDiff";
-import { isFilePreviewSide, readReviewFileLines, readReviewImage } from "../git/fileBlob";
+import {
+  isFilePreviewSide,
+  isReadablePath,
+  readReviewFileLineCount,
+  readReviewFileLines,
+  readReviewImage,
+  readWorktreeTextFile,
+} from "../git/fileBlob";
+import { findSymbolDefinitions } from "../git/symbolSearch";
 import { GitError } from "../git/run";
 import {
   resolveGitHubToken as resolveGitHubTokenFromMachine,
@@ -51,7 +60,7 @@ import {
   GH_RECONNECT_HINT,
   type GitHubTargetStatus,
 } from "../github/reviewTarget";
-import { readReviewSession, writeReviewSession } from "../review/sessionStore";
+import { deleteReviewSession, readReviewSession, writeReviewSession } from "../review/sessionStore";
 import type { CliStatus } from "../banner";
 import { createLogger, labeled } from "../log";
 import type { Logger } from "winston";
@@ -87,6 +96,14 @@ export interface GitHubStatusPayload {
   reason: string | null;
   /** Non-blocking caution about comment placement for the current scope. */
   warning: string | null;
+}
+
+/** One file's text for the source viewer tab. */
+export interface SourceFilePayload {
+  path: string;
+  lines: string[];
+  /** True when the file was longer than the viewer will serve. */
+  truncated: boolean;
 }
 
 export interface ReviewSessionPayload {
@@ -505,6 +522,86 @@ export function createReviewServer(options: CreateReviewServerOptions) {
     }
   });
 
+  app.get("/api/file-line-count", async (req, res) => {
+    const filePath = queryString(req.query.path);
+    const side = queryString(req.query.side);
+    if (!filePath || !isFilePreviewSide(side)) {
+      sendJson(res, 400, { error: "path and side=old|new are required." });
+      return;
+    }
+    try {
+      const totalLines = await readReviewFileLineCount(snapshot, filePath, side);
+      if (totalLines == null) {
+        sendJson(res, 404, { error: "No text available for that file." });
+        return;
+      }
+      sendJson(res, 200, { totalLines });
+    } catch (error) {
+      const message = error instanceof GitError ? error.message : "Could not read that file.";
+      sendJson(res, 400, { error: message });
+    }
+  });
+
+  app.get("/api/definition", async (req, res) => {
+    const symbol = queryString(req.query.symbol);
+    const fromPath = queryString(req.query.path);
+    if (!symbol || !fromPath) {
+      sendJson(res, 400, { error: "symbol and path are required." });
+      return;
+    }
+    if (!isSymbolName(symbol)) {
+      sendJson(res, 400, { error: "That is not an identifier." });
+      return;
+    }
+    // The line the click was on, so a parameter or local in scope wins over a
+    // same-named declaration on the other side of the repo. Optional: a click
+    // on a revealed context line has no line number to send.
+    const line = Number(queryString(req.query.line));
+    try {
+      const definitions = await findSymbolDefinitions(
+        snapshot.repo.repoRoot,
+        symbol,
+        fromPath,
+        Number.isInteger(line) && line > 0 ? line : undefined,
+      );
+      sendJson(res, 200, { definitions });
+    } catch (error) {
+      const message =
+        error instanceof GitError ? error.message : "Could not search for that symbol.";
+      sendJson(res, 400, { error: message });
+    }
+  });
+
+  // Whole-file text for the viewer a declaration opens in a new tab. Scoped to
+  // files git knows about, so an ignored secret next to the code stays unread.
+  app.get("/api/source", async (req, res) => {
+    const filePath = queryString(req.query.path);
+    if (!filePath) {
+      sendJson(res, 400, { error: "path is required." });
+      return;
+    }
+    try {
+      if (!(await isReadablePath(snapshot.repo.repoRoot, filePath))) {
+        sendJson(res, 404, { error: "That file is not in this repository." });
+        return;
+      }
+      const file = await readWorktreeTextFile(snapshot.repo.repoRoot, filePath);
+      if (!file) {
+        sendJson(res, 404, { error: "No text to show for that file." });
+        return;
+      }
+      const payload: SourceFilePayload = {
+        path: filePath,
+        lines: file.lines,
+        truncated: file.truncated,
+      };
+      sendJson(res, 200, payload);
+    } catch (error) {
+      const message = error instanceof GitError ? error.message : "Could not read that file.";
+      sendJson(res, 400, { error: message });
+    }
+  });
+
   app.put("/api/diff", async (req, res) => {
     const parsed = readJsonBody(req);
     if (!parsed.ok || !parsed.value || typeof parsed.value !== "object") {
@@ -519,6 +616,10 @@ export function createReviewServer(options: CreateReviewServerOptions) {
     }
     try {
       const next = await rebuildLocalReview(snapshot.repo, scope);
+      if (next.selectedScope !== scope) {
+        sendJson(res, 400, { error: "That diff is no longer available." });
+        return;
+      }
       if (next.empty) {
         sendJson(res, 400, { error: "That scope has no changes." });
         return;
@@ -648,6 +749,22 @@ export function createReviewServer(options: CreateReviewServerOptions) {
       sendJson(res, 500, { error: message });
     }
   };
+
+  app.delete("/api/review-state", async (req, res) => {
+    const key = queryString(req.query.key);
+    if (!key) {
+      sendJson(res, 400, { error: "key is required." });
+      return;
+    }
+    try {
+      await deleteReviewSession(snapshot.repo.gitDir, key);
+      sendJson(res, 200, { ok: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not discard the review.";
+      stateLog.warn(message);
+      sendJson(res, 500, { error: message });
+    }
+  });
 
   app.put("/api/review-state", saveReviewState);
   // Same handler under POST: the unload-time flush cannot use PUT everywhere.
