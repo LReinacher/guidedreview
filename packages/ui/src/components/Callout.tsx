@@ -6,7 +6,7 @@ export function Callout({
   className,
   "data-testid": testId,
 }: {
-  kind: "ok" | "error";
+  kind: "ok" | "warn" | "error";
   message: string;
   className?: string;
   "data-testid"?: string;
@@ -21,6 +21,7 @@ export function Callout({
       className={cn(
         "m-0 rounded-md border px-3 py-2 text-base",
         kind === "ok" && "border-border bg-background/60 text-success",
+        kind === "warn" && "border-warning/40 bg-warning/10 text-warning",
         kind === "error" &&
           "border-[color-mix(in_srgb,var(--color-danger)_35%,var(--color-border))] bg-[color-mix(in_srgb,var(--color-danger)_10%,var(--color-surface-raised))] text-danger",
         className,

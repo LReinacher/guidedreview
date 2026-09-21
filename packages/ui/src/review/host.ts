@@ -13,6 +13,7 @@ import {
 } from "react";
 import type {
   ParsedDiff,
+  PRIdentity,
   ReviewContext,
   ReviewErrorInfo,
   ReviewPlan,
@@ -20,6 +21,7 @@ import type {
   SubmitReviewResponse,
 } from "@guided-review/ui/review/types";
 import type { ReviewCommentInput, ReviewEvent } from "@guided-review/ui/review/types";
+import type { SymbolKind } from "@guided-review/core";
 import type { DiffViewMode } from "./diffView";
 import type { DraftComment } from "./commentTypes";
 
@@ -36,11 +38,30 @@ export interface ReviewSubmitAuth {
   name?: string;
 }
 
+/** The pull request a review would be posted to, resolved at submit time. */
+export interface ReviewSubmitTarget {
+  pr: PRIdentity;
+  /** Human label for the dialog, e.g. `acme/widget#42`. */
+  label?: string;
+  /**
+   * Non-blocking caution about this submission — typically that the reviewed
+   * diff does not match the PR head, so inline comments may not line up.
+   */
+  warning?: string | null;
+}
+
 export interface ReviewHostSubmit {
   ConnectionDialog?: ComponentType<ReviewConnectionProps>;
   getAuthStatus(): Promise<{ ok: true; auth: ReviewSubmitAuth | null }>;
+  /**
+   * Which PR to post to. The GitHub host reads it off the page context it is
+   * already running on; the CLI has to ask its server which PR the checked-out
+   * branch belongs to. Hosts that omit this fall back to the PR identity in
+   * `ReviewContext`.
+   */
+  resolveTarget?(context: ReviewContext | null): Promise<ReviewSubmitTarget | null>;
   submitReview(
-    pr: { owner: string; repo: string; number: number },
+    pr: PRIdentity,
     body: string,
     event: ReviewEvent,
     comments: ReviewCommentInput[],
@@ -64,6 +85,53 @@ export interface FilePreviewRequest {
   context: ReviewContext;
 }
 
+export interface FileLinesRequest {
+  path: string;
+  side: FilePreviewSide;
+  /** 1-indexed, inclusive. */
+  startLine: number;
+  endLine: number;
+  context: ReviewContext;
+}
+
+export interface FileLineCountRequest {
+  path: string;
+  side: FilePreviewSide;
+  context: ReviewContext;
+}
+
+/** One command-clicked identifier the overlay wants a declaration for. */
+export interface SymbolDefinitionRequest {
+  symbol: string;
+  /** File the click came from: picks the language and ranks nearby files first. */
+  fromPath: string;
+  /**
+   * 1-indexed line the click was on, when the overlay knows it. Hosts that can
+   * read the file use it to resolve local scope — a parameter or a local
+   * beats a same-named declaration anywhere else.
+   */
+  fromLine?: number;
+  context: ReviewContext;
+}
+
+/** A declaration the host found, ready to preview without another round trip. */
+export interface SymbolDefinition {
+  path: string;
+  /** 1-indexed line the declaration starts on. */
+  line: number;
+  kind: SymbolKind | null;
+  /** The declaration and a few lines after it. */
+  snippet: string[];
+  /** 1-indexed file line of `snippet[0]`. */
+  snippetStartLine: number;
+  /**
+   * Set only when the declaration is inside the reviewed diff, in which case
+   * the overlay can jump to it in place instead of opening the file.
+   */
+  diffLineId?: string;
+  hunkId?: string;
+}
+
 export interface ReviewHost {
   kind: "github" | "local";
   /** Marketing demo controls. The underlying kind still drives the real host UI. */
@@ -74,6 +142,19 @@ export interface ReviewHost {
   assetUrl(path: string): string;
   persistSession(key: string, data: unknown): Promise<void>;
   restoreSession(key: string): Promise<unknown | null>;
+  /**
+   * Persist sessions that have not been AI-structured yet. Hosts whose storage
+   * is durable (the CLI writes into the git dir) turn this on so a crash never
+   * costs the user their comments; the extension keeps only AI plans, which is
+   * all a browser session needs to avoid a repeat provider call.
+   */
+  persistPartialSessions?: boolean;
+  /**
+   * Drop a saved review. Only hosts that persist durably need this — it is
+   * what "start over" calls so the discarded review cannot come back on the
+   * next run.
+   */
+  clearSession?(key: string): Promise<void>;
   streamPlan(
     diff: ParsedDiff,
     context: ReviewContext,
@@ -89,6 +170,25 @@ export interface ReviewHost {
    * GitHub returns a `data:` URL (CSP + private repos); the CLI returns `/api/file`.
    */
   filePreviewUrl?(request: FilePreviewRequest): Promise<string | null>;
+  /**
+   * Source lines `[startLine, endLine]` (1-indexed, inclusive) from one side of
+   * a file. When a host implements this, the overlay expands the collapsed
+   * gaps between hunks in place; when it does not, the gap falls back to
+   * `fileLineUrl` (GitHub opens the file at that line instead).
+   */
+  fileLines?(request: FileLinesRequest): Promise<string[] | null>;
+  /**
+   * How many lines one side of a file has. Only the end of the file needs it:
+   * the patch says nothing about what follows the last hunk, so without a
+   * count the overlay cannot tell "20 more lines below" from "end of file".
+   */
+  fileLineCount?(request: FileLineCountRequest): Promise<number | null>;
+  /**
+   * Declarations of `symbol` anywhere the host can see — the repo for the CLI.
+   * Hosts without a filesystem omit it, and go-to-definition falls back to the
+   * declarations inside the reviewed diff.
+   */
+  findDefinition?(request: SymbolDefinitionRequest): Promise<SymbolDefinition[]>;
   submit?: ReviewHostSubmit;
   /**
    * Enables Generate Prompt. With submit it is a secondary action;
@@ -114,9 +214,18 @@ export function ReviewHostProvider({ host, children }: { host: ReviewHost; child
   return createElement(ReviewHostContext.Provider, { value: host }, children);
 }
 
-export function useReviewHost(): ReviewHost {
+/**
+ * The host if one is set, else null. For leaf components that only vary a
+ * detail on a host capability (can this review be posted to GitHub?) and must
+ * still render standalone.
+ */
+export function useOptionalReviewHost(): ReviewHost | null {
   const fromContext = useContext(ReviewHostContext);
-  const host = fromContext ?? activeHost;
+  return fromContext ?? activeHost;
+}
+
+export function useReviewHost(): ReviewHost {
+  const host = useOptionalReviewHost();
   if (!host) {
     throw new Error("ReviewHost is not set. Wrap the overlay in ReviewHostProvider.");
   }

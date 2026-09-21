@@ -8,7 +8,7 @@ export const toc = [
 
 # Connect GitHub
 
-Connecting GitHub is **optional** for reading a PR and generating a guided plan in the **Chrome extension**. It is required if you want to **[submit a review](/docs/submit-review)** (line comments, approve, request changes) from the overlay. The [CLI](/docs/cli) does not use GitHub OAuth — local notes stay on your machine.
+Connecting GitHub is **optional** for reading a PR and generating a guided plan in the **Chrome extension**. It is required if you want to **[submit a review](/docs/submit-review)** (line comments, approve, request changes) from the overlay. The [CLI](/docs/cli#posting-to-github) does not use this OAuth flow at all — it posts with the credentials the machine already has (`gh auth token`, or `GH_TOKEN` / `GITHUB_TOKEN`).
 
 You still need an [AI provider](/docs/configure-provider) to build an AI plan. Auth for GitHub and your LLM are separate.
 

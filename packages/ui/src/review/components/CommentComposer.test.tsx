@@ -36,7 +36,7 @@ describe("CommentComposer", () => {
     const input = screen.getByTestId("comment-composer-input");
     fireEvent.change(input, { target: { value: "needs tests" } });
     fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
-    expect(onSave).toHaveBeenCalledWith("needs tests");
+    expect(onSave).toHaveBeenCalledWith("needs tests", "local");
   });
 
   it("does not save empty body on Ctrl+Enter", () => {

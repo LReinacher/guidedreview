@@ -47,9 +47,11 @@ Same providers. Keys resolve in order for each run:
 2. A key saved in `~/.config/guided-review/config.json` (or `$XDG_CONFIG_HOME` / `GUIDED_REVIEW_CONFIG_DIR`)
 3. A coding agent already on this machine (Claude Code, Codex, or Grok)
 
-In the local UI, open **Settings** (`⌘/Ctrl` + `,`, or **Connect AI Provider** when no key is set). Paste an API key, or turn on **Use My Subscription** to borrow an agent already logged in on the machine. A saved API key always wins for that machine; flags and env still win for the current run. Subscription reuse is unofficial and can break — a console key is the better option.
+In the local UI, open **Settings** (`⌘/Ctrl` + `,`, or **Connect AI Provider** when no key is set). Paste an API key, or turn on **Use My Subscription** to use an agent already logged in on the machine. A saved API key always wins for that machine; flags and env still win for the current run.
 
-When the CLI borrows an agent key, it reads that agent’s store at review time and does not copy the secret into Guided Review config. Details and scopes: [CLI → API keys](/docs/cli#api-keys).
+**Claude Code** runs as a program: the CLI spawns `claude -p` and Claude Code signs the request with your existing login, so a Claude subscription works and no credential ever reaches Guided Review. Reviews count against that plan's limits. `claude` must be on your `PATH`.
+
+**Codex and Grok** instead lend their stored token to a direct provider API call. That is unofficial and can break when the agent rotates a token or logs out — a ChatGPT login on Codex does not work at all, because api.openai.com rejects it. A console key is the better option there. Either way the CLI reads the agent at review time and does not copy a secret into Guided Review config. Details and scopes: [CLI → API keys](/docs/cli#api-keys).
 
 ## Pick a model
 
@@ -57,11 +59,11 @@ Select a model available on your account. Prefer a model that handles long conte
 
 Models currently listed in the extension Options (ids can change as providers ship or retire models):
 
-| Provider  | Models                                                        |
-| --------- | ------------------------------------------------------------- |
-| Anthropic | Claude Opus 4.8, Opus 4.7, Sonnet 5, Sonnet 4.6, Haiku 4.5    |
-| OpenAI    | GPT-5, GPT-5 Mini, GPT-4.1, GPT-4.1 Mini, GPT-4o, o3, o4 Mini |
-| Grok      | Grok 4.6, Grok 4.5, Grok 4, Grok 3, Grok 3 Mini               |
+| Provider  | Models                                                             |
+| --------- | ------------------------------------------------------------------ |
+| Anthropic | Claude Opus 5, Opus 4.8, Opus 4.7, Sonnet 5, Sonnet 4.6, Haiku 4.5 |
+| OpenAI    | GPT-5, GPT-5 Mini, GPT-4.1, GPT-4.1 Mini, GPT-4o, o3, o4 Mini      |
+| Grok      | Grok 4.6, Grok 4.5, Grok 4, Grok 3, Grok 3 Mini                    |
 
 If a stored model disappears from the catalog, Options falls back to that provider’s default. The CLI accepts `--model <id>` for any model id your account can call.
 

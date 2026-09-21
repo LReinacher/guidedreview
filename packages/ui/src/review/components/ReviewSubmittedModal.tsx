@@ -8,6 +8,8 @@ export interface ReviewSubmittedModalProps {
   event: ReviewEvent;
   /** Number of line comments included in the submitted review. */
   commentCount: number;
+  /** False when the host stays open after submitting (the CLI). */
+  exitsReview?: boolean;
   onExit: () => void;
 }
 
@@ -34,6 +36,7 @@ export function ReviewSubmittedModal({
   open,
   event,
   commentCount,
+  exitsReview = true,
   onExit,
 }: ReviewSubmittedModalProps) {
   const titleId = useId();
@@ -98,7 +101,7 @@ export function ReviewSubmittedModal({
         onClick={onExit}
         data-testid="review-submitted-exit"
       >
-        Exit Review
+        {exitsReview ? "Exit Review" : "Back to Review"}
         <Kbd>Enter</Kbd>
       </Button>
     </ModalShell>

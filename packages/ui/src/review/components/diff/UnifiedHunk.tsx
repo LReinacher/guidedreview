@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { cn } from "@guided-review/ui";
 import {
   CodeContent,
+  CommentLineButton,
   DIFF_LINE_WRAP,
   highlightHunkLines,
   LineExtras,
@@ -40,15 +41,22 @@ export function UnifiedHunk({
           <div key={i}>
             <div
               data-line-id={id}
+              // Read back on command-click to resolve local scope. Always the
+              // new-side line: that is the file as it exists now, which is what
+              // a host reads. Deleted lines have no new-side position and so
+              // carry no hint at all.
+              data-line-number={line.newLine}
               data-testid={isFocus ? "diff-line-focus" : undefined}
               aria-current={isFocus ? "true" : undefined}
               className={cn(
                 DIFF_LINE_WRAP,
+                "group/line",
                 showDiffBg && line.type === "add" && "bg-diff-add-bg",
                 showDiffBg && line.type === "del" && "bg-diff-del-bg",
                 selectionClasses(id, selectedIds, focusId),
               )}
             >
+              <CommentLineButton lineId={id} />
               <span
                 className={lineNumberClasses(highlightNumber)}
                 data-testid={highlightNumber ? "diff-line-number-highlight" : undefined}

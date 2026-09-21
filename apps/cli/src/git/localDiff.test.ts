@@ -185,6 +185,41 @@ describe("buildLocalReview", () => {
     expect(uncommitted.diff.files.map((f) => f.path)).not.toContain("feat.ts");
   });
 
+  it("combines committed, staged, unstaged and untracked work into one scope", async () => {
+    const root = await makeRepo();
+    await git(root, ["checkout", "-b", "feat"]);
+    await writeFile(path.join(root, "committed.ts"), "export const c = 1;\n");
+    await git(root, ["add", "committed.ts"]);
+    await git(root, ["commit", "-m", "add committed"]);
+    await writeFile(path.join(root, "staged.ts"), "export const s = 1;\n");
+    await git(root, ["add", "staged.ts"]);
+    await writeFile(path.join(root, "readme.md"), "hello unstaged\n");
+    await writeFile(path.join(root, "untracked.ts"), "export const u = 1;\n");
+
+    const everything = await buildLocalReview({ cwd: root, scope: "everything" });
+    expect(everything.selectedScope).toBe("everything");
+    expect(everything.diff.files.map((f) => f.path).sort()).toEqual([
+      "committed.ts",
+      "readme.md",
+      "staged.ts",
+      "untracked.ts",
+    ]);
+
+    // Offered only when it is genuinely more than the branch scope alone.
+    expect(everything.scopes[0]?.id).toBe("everything");
+    const clean = await makeRepo();
+    await git(clean, ["checkout", "-b", "feat"]);
+    await writeFile(path.join(clean, "only.ts"), "export const o = 1;\n");
+    await git(clean, ["add", "only.ts"]);
+    await git(clean, ["commit", "-m", "only"]);
+    const branchOnly = await buildLocalReview({ cwd: clean });
+    expect(branchOnly.scopes.map((scope) => scope.id)).not.toContain("everything");
+
+    // Asking for a scope that is no longer offered falls back rather than throwing.
+    const fellBack = await rebuildLocalReview(branchOnly.repo, "everything");
+    expect(fellBack.selectedScope).toBe("branch");
+  });
+
   it("splits unstaged from staged work", async () => {
     const root = await makeRepo();
     await writeFile(path.join(root, "staged.ts"), "export const s = 1;\n");

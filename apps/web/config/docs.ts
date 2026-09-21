@@ -139,11 +139,11 @@ export const DOCS_PAGES: DocsPage[] = [
   {
     slug: "leave-comments",
     section: "Product",
-    title: "Leave line comments",
+    title: "Leave comments",
     description:
-      "Draft GitHub-style line comments while walking Guided Review units, edit or remove them locally, then submit through the extension.",
-    lastModified: "2026-09-06",
-    blurb: "comment mode, drafts, multi-line ranges",
+      "Draft GitHub-style comments on a line, a range, or a whole file while walking Guided Review units, edit or remove them locally, then submit through the extension.",
+    lastModified: "2026-09-08",
+    blurb: "click to comment, file comments, drafts, multi-line ranges",
     load: () => import("@web/content/help/leave-comments.mdx"),
   },
   {

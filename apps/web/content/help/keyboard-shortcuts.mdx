@@ -2,6 +2,7 @@ export const toc = [
   { id: "review-navigation", label: "Review navigation", level: 2 },
   { id: "diff-view", label: "Diff view", level: 2 },
   { id: "diff-search", label: "Diff search", level: 2 },
+  { id: "go-to-definition", label: "Go to definition", level: 2 },
   { id: "comment-mode", label: "Comment mode", level: 2 },
   { id: "submit-and-modals", label: "Submit and modals", level: 2 },
   { id: "local-review", label: "Local review", level: 2 },
@@ -26,6 +27,7 @@ The Guided Review sidebar always lists the same shortcuts as this page. Most cho
 | `Esc`              | Exit Guided Review (when not in comment mode or a modal)                                        |
 | `c`                | Enter [Comment Mode](/docs/leave-comments) (if the unit has selectable lines)                   |
 | `⌘/Ctrl` + `F`     | Open [Diff Search](#diff-search)                                                                |
+| `⌘/Ctrl` + Click   | Preview Where a Symbol Is Declared ([Go to definition](#go-to-definition))                      |
 | `⌘/Ctrl` + `Enter` | Open [Submit Review](/docs/submit-review) (or [Connect GitHub](/docs/connect-github) if needed) |
 
 On a GitHub PR, while Guided Review is open, keys are not passed through to GitHub’s page shortcuts. What a “unit” is: [How a review plan works](/docs/how-it-works#review-units).
@@ -53,6 +55,34 @@ Search **every** file path and line in the parsed diff — not only the active u
 Press `⌘/Ctrl` + `F` again while the palette is open to re-focus and select the query. Renames match on the old or new path. Binary / elided files contribute path hits only.
 
 This is Guided Review’s own search palette. On a PR page, GitHub’s find does not run while the overlay owns the keyboard.
+
+## Go to definition
+
+Hold `⌘/Ctrl` and click a function, class, or type in the diff. Identifiers underline while the key is down, and a click opens a card with the declaration — path, line, and the source itself — before you go anywhere.
+
+The card holds the declaration plus the lines around it — scroll inside it to read the rest of the body without leaving the review.
+
+Lookup follows the order a reader expects:
+
+1. **What the name is bound to in the file you clicked in** — a parameter, a local, a `const` in an enclosing block. Clicking an argument resolves to the parameter it arrived on, not to a same-named local somewhere else in the repo.
+2. **The module it was imported from**, when the import is relative and the file is in the repo. Package imports and path aliases are not resolved to a file, but the module name still ranks the candidates.
+3. **The rest of the repository**, with test files last unless you clicked in one.
+
+From the card:
+
+- **Open in New Tab** — the file at that line. The CLI opens its own source viewer; on a PR page it opens the file on GitHub.
+- **Jump to It** — only when the declaration is part of the diff you are reviewing. Moves the walkthrough to the unit that owns it and scrolls the line into view.
+- `‹` / `›` when several files declare the same name. Declarations in the file you clicked from, then its directory, rank first.
+- `Esc` closes the card and leaves the review exactly where it was.
+
+What can be found depends on where the review runs:
+
+| Host                                           | Searches                                                                               |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------- |
+| **[CLI](/docs/cli)**                           | The whole repository, including files the branch never touched and new untracked files |
+| **[Chrome extension](/docs/chrome-extension)** | The diff itself — declarations the PR adds or keeps                                    |
+
+This is pattern matching, not a language server: it reads declaration shapes for the file's language out of candidate lines, and scope from indentation. It finds ordinary functions, classes, types, methods, constants, parameters and imports; it will not resolve a symbol that is built at runtime, generated, or defined in a dependency, and on a name that several modules declare it can still offer the wrong one. That is why the card previews first and moves second.
 
 ## Comment mode
 

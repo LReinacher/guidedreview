@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { parseDiff, type ParsedDiff, type ReviewContext } from "@guided-review/core";
+import { resolveBaseRef } from "./baseRef";
 import { GitError, runGit } from "./run";
 
 export interface LocalDiffOptions {
@@ -12,7 +13,7 @@ export interface LocalDiffOptions {
   scope?: DiffScopeId;
 }
 
-export type DiffScopeId = "branch" | "uncommitted" | "unstaged" | `commit:${string}`;
+export type DiffScopeId = "everything" | "branch" | "uncommitted" | "unstaged" | `commit:${string}`;
 
 export interface DiffStat {
   files: number;
@@ -43,6 +44,8 @@ export interface DiffScopeOption {
 
 export interface LocalRepoState {
   repoRoot: string;
+  /** Absolute `.git` dir — where durable review sessions are stored. */
+  gitDir: string;
   baseRef: string;
   headRef: string;
   mergeBase: string;
@@ -68,6 +71,7 @@ const MAX_RECENT_COMMITS = 5;
 
 export function isDiffScopeId(value: string): value is DiffScopeId {
   return (
+    value === "everything" ||
     value === "branch" ||
     value === "uncommitted" ||
     value === "unstaged" ||
@@ -85,37 +89,6 @@ export function reviewHasChanges(snapshot: LocalReviewSnapshot): boolean {
 
 function nullDevice(): string {
   return process.platform === "win32" ? "NUL" : "/dev/null";
-}
-
-async function resolveBase(repoRoot: string, requested?: string): Promise<string> {
-  if (requested) {
-    try {
-      await runGit(["rev-parse", "--verify", requested], repoRoot);
-      return requested;
-    } catch {
-      throw new GitError(
-        `Base ref "${requested}" does not exist. Pass --base with a real branch or commit.`,
-      );
-    }
-  }
-
-  const candidates = ["origin/HEAD", "main", "master"];
-  for (const candidate of candidates) {
-    try {
-      const resolved = (await runGit(["rev-parse", "--abbrev-ref", candidate], repoRoot)).trim();
-      if (candidate === "origin/HEAD") {
-        return resolved || candidate;
-      }
-      await runGit(["rev-parse", "--verify", candidate], repoRoot);
-      return candidate;
-    } catch {
-      // try next
-    }
-  }
-
-  throw new GitError(
-    "Could not find a default base branch (origin/HEAD, main, or master). Pass --base <ref>.",
-  );
 }
 
 /** Bound concurrent `git diff --no-index` child processes for untracked files. */
@@ -217,7 +190,9 @@ function formatCommitsForPrompt(commits: LocalCommit[], selected: DiffScopeId): 
         .join("\n\n"),
     );
   }
-  if (selected === "uncommitted") {
+  if (selected === "everything") {
+    parts.push("Reviewing committed, staged, and unstaged work on this branch together.");
+  } else if (selected === "uncommitted") {
     parts.push("Working tree has uncommitted changes.");
   } else if (selected === "unstaged") {
     parts.push("Reviewing unstaged changes only.");
@@ -259,6 +234,11 @@ function gitForScope(
 ): { sha: string } | { range: string[]; includeUntracked: boolean } {
   const sha = commitShaFromScope(scope);
   if (sha) return { sha };
+  // Merge base against the working tree, so commits, index, and unstaged edits
+  // all land in one diff.
+  if (scope === "everything") {
+    return { range: [repo.mergeBase], includeUntracked: repo.includeUntracked };
+  }
   if (scope === "branch") return { range: [repo.mergeBase, "HEAD"], includeUntracked: false };
   if (scope === "unstaged") return { range: [], includeUntracked: false };
   if (repo.staged) return { range: ["--cached", "HEAD"], includeUntracked: false };
@@ -338,6 +318,7 @@ async function buildScopes(
       statForScope(repo, "branch", untrackedCount),
       statForScope(repo, "uncommitted", untrackedCount),
       statForScope(repo, "unstaged", untrackedCount),
+      statForScope(repo, "everything", untrackedCount),
     ]),
     countCommitsAhead(repo),
     Promise.all(
@@ -346,7 +327,7 @@ async function buildScopes(
       ),
     ),
   ]);
-  const [branchStat, uncommittedStat, unstagedStat] = workingTreeStats;
+  const [branchStat, uncommittedStat, unstagedStat, everythingStat] = workingTreeStats;
 
   const commitExtra = `${commitCount} commit${commitCount === 1 ? "" : "s"}`;
 
@@ -380,6 +361,20 @@ async function buildScopes(
     },
   ];
 
+  // Only worth its own row when it is actually a combination — with a clean
+  // tree it is the branch scope, and with no commits it is the uncommitted one.
+  if (branchStat.files > 0 && uncommittedStat.files > 0) {
+    scopes.unshift({
+      id: "everything",
+      label: `Everything on ${headLabel}`,
+      description: `Committed, staged, and unstaged work versus ${repo.baseRef}, in one diff.`,
+      meta: formatScopeMeta(everythingStat, commitExtra),
+      metaPrefix: commitExtra,
+      stat: everythingStat,
+      empty: everythingStat.files === 0,
+    });
+  }
+
   recent.forEach((commit, index) => {
     const stat = commitStats[index]!;
     commit.stat = stat;
@@ -407,8 +402,14 @@ export async function currentDiffHash(repo: LocalRepoState, scope: DiffScopeId):
   return hashDiff(await rawDiffForScope(repo, scope, untracked));
 }
 
-function sessionKeyFor(repo: LocalRepoState, scope: DiffScopeId, raw: string): string {
-  return `${path.basename(repo.repoRoot)}:${repo.baseRef}:${repo.headRef}:${scope}:${hashDiff(raw).slice(0, 12)}`;
+/**
+ * Identity of a review, stable across edits to the diff. It deliberately
+ * excludes the diff hash: a review has to survive the user changing the code
+ * mid-review (that is the normal case), and staleness is tracked separately by
+ * comparing the persisted `diffHash` against the current one.
+ */
+function sessionKeyFor(repo: LocalRepoState, scope: DiffScopeId): string {
+  return `${path.basename(repo.repoRoot)}:${repo.baseRef}:${repo.headRef}:${scope}`;
 }
 
 function contextFor(
@@ -434,12 +435,14 @@ async function inspectLocalRepo(options: LocalDiffOptions): Promise<LocalRepoSta
     throw new GitError("Not a git repository. Run this from a repo, or pass a path to one.");
   }
 
-  const baseRef = await resolveBase(repoRoot, options.base);
-  const mergeBase = (await runGit(["merge-base", "HEAD", baseRef], repoRoot)).trim();
+  const gitDir = (await runGit(["rev-parse", "--absolute-git-dir"], repoRoot)).trim();
   const headRef = (await runGit(["rev-parse", "--abbrev-ref", "HEAD"], repoRoot)).trim() || "HEAD";
+  const baseRef = await resolveBaseRef(repoRoot, headRef, options.base);
+  const mergeBase = (await runGit(["merge-base", "HEAD", baseRef], repoRoot)).trim();
 
   return {
     repoRoot,
+    gitDir,
     baseRef,
     headRef,
     mergeBase,
@@ -455,10 +458,12 @@ async function snapshotFrom(
   const untracked = repo.includeUntracked && !repo.staged ? await listUntracked(repo.repoRoot) : [];
   const commits = await listCommits(repo);
   const scopes = await buildScopes(repo, commits, untracked);
-  const selected = requested ?? pickDefaultScope(scopes, repo.staged);
-  if (requested && !scopes.some((option) => option.id === requested)) {
-    throw new GitError(`Unknown diff scope "${requested}".`);
-  }
+  // A scope can stop being offered while a review is open: a commit ages out
+  // of the recent list, or the combined scope collapses once the tree is
+  // clean. Falling back beats stranding the session on a scope that is gone —
+  // callers that need the exact one compare `selectedScope` afterwards.
+  const offered = requested && scopes.some((option) => option.id === requested);
+  const selected = offered ? requested! : pickDefaultScope(scopes, repo.staged);
   const raw = await rawDiffForScope(repo, selected, untracked);
   const diff = parseDiff(raw);
   return {
@@ -469,7 +474,7 @@ async function snapshotFrom(
     context: contextFor(repo, commits, selected),
     diff,
     raw,
-    sessionKey: sessionKeyFor(repo, selected, raw),
+    sessionKey: sessionKeyFor(repo, selected),
     empty: diff.files.length === 0,
   };
 }

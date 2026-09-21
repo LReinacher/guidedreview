@@ -27,8 +27,10 @@ interface ContextPanelProps {
   loadingDetail?: string | null;
   /** Retry the failed API / review build step. */
   onRetry?: () => void;
-  /** Local: start the opt-in annotation stream from the Change summary card. */
+  /** Local: start (or rebuild) the opt-in annotation stream from the Change summary card. */
   onStructureReview?: () => void;
+  /** Local: throw the saved review away and start it again from scratch. */
+  onStartOver?: () => void;
   /** Local: an AI plan is already in place for the current scope. */
   structured?: boolean;
   /** Local: selected coding agent / provider shown under Structure with AI. */
@@ -86,6 +88,7 @@ function SummaryUnitPanel({
   loading,
   loadingDetail,
   onStructureReview,
+  onStartOver,
   structured,
   structureWith,
 }: {
@@ -94,6 +97,7 @@ function SummaryUnitPanel({
   loading?: boolean;
   loadingDetail?: string | null;
   onStructureReview?: () => void;
+  onStartOver?: () => void;
   structured: boolean;
   structureWith?: { provider: ProviderId; label: string };
 }) {
@@ -102,25 +106,39 @@ function SummaryUnitPanel({
     hasTitle && hasDescription && host.kind === "github"
       ? PR_DESCRIPTION_HINT
       : missingMetadataHint(hasTitle, hasDescription, host.kind);
-  const showStructure = Boolean(onStructureReview && !structured);
+  const canStructure = Boolean(onStructureReview);
+  // Once a plan exists the pitch is spent; the card goes back to the summary
+  // hint and the AI call becomes a rebuild rather than the headline action.
+  const showStructurePitch = canStructure && !structured;
+  const showActions = (canStructure || Boolean(onStartOver)) && !loading;
 
   return (
     <div className="rounded-none border-0 bg-transparent px-0 py-0.5 pb-1">
       <div className="text-lg leading-[1.7] text-foreground" data-testid="context-panel-body">
-        {showStructure ? STRUCTURE_REVIEW_HINT : hint}
+        {showStructurePitch ? STRUCTURE_REVIEW_HINT : hint}
       </div>
-      {showStructure && !loading ? (
+      {showActions ? (
         <div className="mt-4">
-          <Button
-            size="sm"
-            onClick={onStructureReview}
-            data-testid="structure-review"
-            aria-keyshortcuts="Meta+I Control+I"
-          >
-            Structure With AI
-            <ShortcutKeys keys={["mod", "I"]} join="chord" />
-          </Button>
-          {structureWith ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {canStructure ? (
+              <Button
+                size="sm"
+                variant={structured ? "secondary" : "primary"}
+                onClick={onStructureReview}
+                data-testid="structure-review"
+                aria-keyshortcuts="Meta+I Control+I"
+              >
+                {structured ? "Rebuild Structure" : "Structure With AI"}
+                <ShortcutKeys keys={["mod", "I"]} join="chord" />
+              </Button>
+            ) : null}
+            {onStartOver ? (
+              <Button size="sm" variant="secondary" onClick={onStartOver} data-testid="start-over">
+                Start Over
+              </Button>
+            ) : null}
+          </div>
+          {showStructurePitch && structureWith ? (
             <StructureWithCaption provider={structureWith.provider} label={structureWith.label} />
           ) : null}
         </div>
@@ -150,7 +168,7 @@ function SummaryUnitPanel({
           allowExit={host.kind !== "local"}
           showSettings={host.kind === "local"}
           showScopePicker={host.kind === "local"}
-          showStructureReview={showStructure}
+          showStructureReview={canStructure}
         />
       )}
     </div>
@@ -195,6 +213,7 @@ export function ContextPanel({
   loadingDetail,
   onRetry,
   onStructureReview,
+  onStartOver,
   structured = false,
   structureWith,
 }: ContextPanelProps) {
@@ -220,6 +239,7 @@ export function ContextPanel({
         loading={loading}
         loadingDetail={loadingDetail}
         onStructureReview={onStructureReview}
+        onStartOver={onStartOver}
         structured={structured}
         structureWith={structureWith}
       />

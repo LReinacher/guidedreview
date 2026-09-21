@@ -5,7 +5,8 @@ const STDERR_LEVELS = ["error", "warn", "info", "http", "verbose", "debug", "sil
 
 const ALLOWED_LEVELS = new Set(["error", "warn", "info", "debug"]);
 
-export type LogLabel = "cli" | "http" | "session" | "settings" | "diff" | "plan" | "ui";
+export type LogLabel =
+  "cli" | "http" | "session" | "settings" | "diff" | "plan" | "ui" | "github" | "state";
 
 export type CapturedLog = {
   level: string;

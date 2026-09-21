@@ -3,6 +3,7 @@ import { cn } from "@guided-review/ui";
 import { buildSplitRows, type SplitCell } from "@guided-review/ui/review/buildSplitRows";
 import {
   CodeContent,
+  CommentLineButton,
   DIFF_LINE_WRAP,
   highlightHunkLines,
   LineExtras,
@@ -17,6 +18,7 @@ function SplitCellView({
   highlighted,
   side,
   lineId,
+  newLine,
   selectedIds,
   focusId,
 }: {
@@ -24,12 +26,19 @@ function SplitCellView({
   highlighted: string | null;
   side: "left" | "right";
   lineId?: string;
+  /**
+   * New-side line this cell's content lives on, which is the file as it exists
+   * now — the left column displays old numbers, but a definition lookup has to
+   * resolve against the current file.
+   */
+  newLine?: number;
   selectedIds: Set<string>;
   focusId: string | null;
 }) {
   if (cell.kind === "empty") {
     return (
       <div className={cn(DIFF_LINE_WRAP, "flex-1 overflow-hidden")}>
+        <CommentLineButton lineId={undefined} />
         <span className={lineNumberClasses(false)} />
         <span className="min-w-0 flex-1" />
       </div>
@@ -46,16 +55,18 @@ function SplitCellView({
     <div
       className={cn(
         DIFF_LINE_WRAP,
-        "flex-1 overflow-hidden",
+        "group/line flex-1 overflow-hidden",
         showDiffBg && cell.type === "del" && "bg-diff-del-bg",
         showDiffBg && cell.type === "add" && "bg-diff-add-bg",
         selectionClasses(lineId, selectedIds, focusId),
       )}
       data-side={side}
       data-line-id={lineId}
+      data-line-number={newLine}
       data-testid={isFocus ? "diff-line-focus" : undefined}
       aria-current={isFocus ? "true" : undefined}
     >
+      <CommentLineButton lineId={lineId} />
       <span
         className={lineNumberClasses(highlightNumber)}
         data-testid={highlightNumber ? "diff-line-number-highlight" : undefined}
@@ -121,6 +132,11 @@ export function SplitHunk({
                 }
                 side="left"
                 lineId={leftId}
+                newLine={
+                  row.left.kind === "content"
+                    ? hunk.lines[row.left.sourceIndex]?.newLine
+                    : undefined
+                }
                 selectedIds={selectedIds}
                 focusId={focusId}
               />
@@ -132,6 +148,11 @@ export function SplitHunk({
                 }
                 side="right"
                 lineId={rightId}
+                newLine={
+                  row.right.kind === "content"
+                    ? hunk.lines[row.right.sourceIndex]?.newLine
+                    : undefined
+                }
                 selectedIds={selectedIds}
                 focusId={focusId}
               />

@@ -36,12 +36,13 @@ The CLI binds `127.0.0.1:7182` (ASCII G+R), keeps a short terminal banner (URL, 
 
 The header shows the current branch and the base branch. A dropdown picks the diff:
 
+- **Everything on this branch** — committed, staged, unstaged and untracked work together, versus the base. Shown only when there is uncommitted work sitting on top of commits; with a clean tree it would be the branch scope, and with no commits it would be the uncommitted one.
 - **Branch vs base** — committed work on this branch since it diverged from the base (`git diff <merge-base> HEAD`)
 - **Uncommitted** — staged and unstaged work versus `HEAD` (untracked files included unless you passed `--no-untracked`)
 - **Unstaged** — worktree versus the index only
 - **A specific commit** — that commit’s patch
 
-Default selected scope: the first non-empty of branch, uncommitted, unstaged, then the newest commit. `--staged` starts on index-only uncommitted work.
+Default selected scope: the first non-empty of branch, uncommitted, unstaged, then the newest commit. **Everything** is never picked for you — choose it when you want the branch and your working tree reviewed as one change. `--staged` starts on index-only uncommitted work.
 
 Base resolution, in order: `--base` → `origin/HEAD` → `main` → `master`.
 
@@ -55,7 +56,7 @@ The walkthrough starts **one unit per file**. **Structure With AI** on the Chang
 
 Press `d` to open the scope dropdown, `⌘/Ctrl` + `I` to structure, or `⌘/Ctrl` + `,` for Settings — same keys as [Keyboard shortcuts → Local review](/docs/keyboard-shortcuts#local-review). Navigation, diff search, and comment mode share the extension shortcuts where they apply.
 
-Unlike the extension, there is no GitHub submit from the CLI UI. Line notes stay in the session until you [Generate Prompt](#notes) or stop the server.
+Comments are kept as you write them and survive restarting the CLI. When the branch has an open pull request you can [submit them as a review](#posting-to-github); otherwise they feed [Generate Prompt](#notes).
 
 ## API keys
 
@@ -67,11 +68,19 @@ Resolution, in order:
 2. A key already saved in `~/.config/guided-review/config.json`
 3. A coding agent already on this machine (Claude Code, Codex, or Grok)
 
-If more than one agent has a usable key, the CLI asks which to use each run (Enter keeps the last choice). The chosen agent is shown in the browser UI. It reads the agent's own store at review time and does not copy the secret into Guided Review config.
+If more than one agent is usable, the CLI asks which to use each run (Enter keeps the last choice). The chosen agent is shown in the browser UI, and nothing it holds is copied into Guided Review config.
+
+Claude Code is used by running it: the CLI spawns `claude -p` and Claude Code authenticates with your existing login, so a Claude subscription works (it needs `claude` on your `PATH`). Codex and Grok instead lend a stored token to a direct provider API call, which is unofficial and can break — see [Configure AI provider → CLI](/docs/configure-provider#cli).
 
 No key still walks one unit per file. **Structure With AI** asks for a key.
 
-The local UI has **Settings** (header, `⌘/Ctrl` + `,`, or **Connect AI Provider** when no key is set). Paste an API key, or turn on **Use My Subscription** to borrow Claude Code / Codex / Grok on this machine. A saved API key always wins. Subscription is unofficial and can break — a console key is the better option. Save writes the [config file](#config-file) below. Flags and env still win for that run.
+The local UI has **Settings** (header, `⌘/Ctrl` + `,`, or **Connect AI Provider** when no key is set). Paste an API key, or turn on **Use My Subscription** to use Claude Code / Codex / Grok on this machine. A saved API key always wins. Save writes the [config file](#config-file) below. Flags and env still win for that run.
+
+## Collapsed lines
+
+Every run of file the patch leaves out gets a bar with the number of hidden lines: between two hunks, above the first one, and below the last. Click `↓` or `↑` to reveal 20 more from either end, or **Expand N Hidden Lines** when the rest fits in one step — so a three-line diff can be read with the whole file around it. **Reset** in the file header collapses everything expanded in that file.
+
+The CLI reads the lines from the file on disk, so this only works for text files still present in the reviewed scope.
 
 ## Config file
 
@@ -102,7 +111,24 @@ Prefer editing through **Settings** in the UI. If you hand-edit the file, restar
 
 ## Notes
 
-Line comments stay in the session. There is no GitHub submit from the CLI. **Generate Prompt** builds a coding-agent prompt from those notes and copies it — Guided Review does not send it anywhere. Full walkthrough: [Generate Prompt](/docs/generate-prompt). On a GitHub PR, use the extension to [draft and submit](/docs/leave-comments) instead.
+Two escape hatches sit on the Change summary card. **Rebuild Structure** runs the AI pass again over the same diff and keeps every comment — useful when the grouping came out wrong. **Start Over** discards the review outright, comments included, and starts that diff from one unit per file.
+
+A review is saved as you go, under `.git/guided-review/sessions` in the repo you are reviewing. Close the tab or lose the process and the next run resumes the same review — the structure it built, where you were, and every comment you had written, posted or not. Saved reviews are keyed by base, branch, and scope, and never leave the clone.
+
+**Generate Prompt** builds a coding-agent prompt from your notes and copies it — Guided Review does not send it anywhere. Full walkthrough: [Generate Prompt](/docs/generate-prompt).
+
+### Posting to GitHub
+
+When the branch has an open pull request and this machine has GitHub credentials, **Submit Review** posts a real pull request review: your inline comments, a summary, and Comment / Approve / Request changes — the same flow as [the extension](/docs/submit-review). Generate Prompt stays available beside it.
+
+Credentials come from `gh auth token`, or from `GH_TOKEN` / `GITHUB_TOKEN`. There is nothing extra to log into and Guided Review stores no token of its own.
+
+Every comment picks a destination as you write it:
+
+- **GitHub** — posted as an inline comment when you submit the review
+- **Local** — stays on this machine, and only feeds Generate Prompt
+
+GitHub anchors review comments to the pull request head. Reviewing uncommitted work, a single commit, or a branch you have not pushed can therefore land comments on the wrong lines, so the submit dialog says so before you post. Pass `--no-github` to turn submission off entirely.
 
 ## Flags
 
@@ -117,6 +143,7 @@ guidedreview [dir] --base main --port 8787 --no-open --staged --no-untracked --a
 | `--no-open`       | Print the URL without opening a browser |
 | `--staged`        | Start on staged changes                 |
 | `--no-untracked`  | Skip untracked files                    |
+| `--no-github`     | Never offer to post to the branch's PR  |
 | `--provider <id>` | `anthropic` \| `openai` \| `grok`       |
 | `--model <id>`    | Provider model id                       |
 | `--agent <id>`    | `claude-code` \| `codex` \| `grok`      |

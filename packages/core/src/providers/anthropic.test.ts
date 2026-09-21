@@ -39,7 +39,7 @@ const input: AnnotateReviewInput = {
     baseRef: "main",
     headRef: "feat",
   },
-  settings: { provider: "anthropic", model: "claude-sonnet-4-5", apiKey: "sk-ant-test" },
+  settings: { provider: "anthropic", model: "claude-opus-5", apiKey: "sk-ant-test" },
 };
 
 async function collect(
@@ -80,10 +80,11 @@ describe("anthropicProvider", () => {
         "anthropic-dangerous-direct-browser-access": "true",
       }),
       expect.objectContaining({
-        model: "claude-sonnet-4-5",
+        model: "claude-opus-5",
         stream: true,
         max_tokens: 8000,
         output_config: expect.objectContaining({
+          effort: "high",
           format: expect.objectContaining({ type: "json_schema" }),
         }),
       }),
@@ -188,7 +189,7 @@ describe("anthropicProvider", () => {
       "https://api.anthropic.com/v1/messages",
       expect.objectContaining({ "x-api-key": "sk-ant-test" }),
       expect.objectContaining({
-        model: "claude-sonnet-4-5",
+        model: "claude-opus-5",
         max_tokens: 8,
         messages: [{ role: "user", content: "Reply with OK." }],
       }),

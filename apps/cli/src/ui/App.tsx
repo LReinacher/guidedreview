@@ -1,30 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildFileReviewPlan, getProvider, type ProviderId } from "@guided-review/core";
-import type { ReviewSessionPayload } from "../server/createServer";
+import type { GitHubStatusPayload, ReviewSessionPayload } from "../server/createServer";
 import { Overlay } from "@guided-review/ui/review/Overlay";
 import { ReviewHostProvider } from "@guided-review/ui/review/host";
 import { restoreSession, useReviewStore } from "@guided-review/ui/review/store";
 import type { LocalDiffControls } from "@guided-review/ui/review/localReview";
 import { createLocalReviewHost } from "./host";
+import { parseAppHash, type AppRouteName } from "./routes";
 import { codingAgentLabel, structureWithLabel } from "./codingAgentLabel";
 import { SettingsApp } from "./settings/SettingsApp";
 import type { PublicSettings } from "./settings/Settings";
 
-type AppRoute = "review" | "settings" | "about";
-
-function parseAppHash(hash: string): AppRoute {
-  const path = hash.replace(/^#\/?/, "").toLowerCase();
-  if (path === "settings" || path === "about") return path;
-  return "review";
-}
-
-function useHashRoute(): AppRoute {
-  const [route, setRoute] = useState<AppRoute>(() =>
-    typeof window !== "undefined" ? parseAppHash(window.location.hash) : "review",
+function useHashRoute(): AppRouteName {
+  const [route, setRoute] = useState<AppRouteName>(() =>
+    typeof window !== "undefined" ? parseAppHash(window.location.hash).name : "review",
   );
 
   useEffect(() => {
-    const onHashChange = () => setRoute(parseAppHash(window.location.hash));
+    const onHashChange = () => setRoute(parseAppHash(window.location.hash).name);
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
@@ -45,30 +38,34 @@ export function App() {
     provider: ProviderId;
     label: string;
   } | null>(null);
+  const [github, setGithub] = useState<GitHubStatusPayload | null>(null);
   const cancelStreamRef = useRef<(() => void) | undefined>(undefined);
-  const hasKeyRef = useRef(false);
+  const readyRef = useRef(false);
   const providerIdRef = useRef<ProviderId>("anthropic");
   const codingAgentRef = useRef<string | null>(null);
 
+  // Rebuilt when the GitHub probe lands: `submit` only exists once the server
+  // has found a pull request and working credentials.
   const host = useMemo(
     () =>
       createLocalReviewHost({
         onConnectProvider: () => {
           window.location.hash = "settings";
         },
+        github,
       }),
-    [],
+    [github],
   );
 
   const applyPublishedSettings = useCallback((published: PublicSettings) => {
-    hasKeyRef.current = published.hasKey;
+    readyRef.current = published.ready;
     providerIdRef.current = published.provider;
     codingAgentRef.current = published.codingAgent ?? null;
     setStructureWith({
       provider: published.provider,
       label: structureWithLabel(published.codingAgent, published.provider),
     });
-    if (published.hasKey) {
+    if (published.ready) {
       const agentLabel = codingAgentLabel(published.codingAgent);
       useReviewStore
         .getState()
@@ -91,6 +88,7 @@ export function App() {
         sessionKey: session.sessionKey,
         diff: session.diff,
         plan: buildFileReviewPlan(session.diff),
+        diffHash: session.diffHash,
       });
       setStructured(false);
     },
@@ -100,7 +98,7 @@ export function App() {
   const startStructure = useCallback(() => {
     const { diff, prContext } = useReviewStore.getState();
     if (!diff || !prContext) return;
-    if (!hasKeyRef.current) {
+    if (!readyRef.current) {
       host.connectProvider();
       return;
     }
@@ -134,6 +132,19 @@ export function App() {
     cancelStreamRef.current = cancel;
   }, [host]);
 
+  /**
+   * Resume the stored review for this scope, if there is one. A stored review
+   * built from a diff that has since changed is still worth restoring — it
+   * holds the user's comments — so it comes back with the stale banner up.
+   */
+  const resumeSession = useCallback(async (session: ReviewSessionPayload): Promise<boolean> => {
+    const restored = await restoreSession(session.sessionKey);
+    if (!restored) return false;
+    setStructured(restored.planSource === "ai");
+    setStale(restored.diffHash !== null && restored.diffHash !== session.diffHash);
+    return true;
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -149,12 +160,8 @@ export function App() {
       applyPublishedSettings(session.settings);
 
       applyMeta(session);
-      const restored = await restoreSession(session.sessionKey);
+      if (await resumeSession(session)) return;
       if (cancelled) return;
-      if (restored) {
-        setStructured(true);
-        return;
-      }
       installFilePlan(session);
     }
 
@@ -170,7 +177,80 @@ export function App() {
       cancelled = true;
       cancelStreamRef.current?.();
     };
-  }, [applyMeta, applyPublishedSettings, installFilePlan]);
+  }, [applyMeta, applyPublishedSettings, installFilePlan, resumeSession]);
+
+  // Whether this branch has a pull request to post to is a `gh` call plus an
+  // API round trip, so it runs beside the review rather than gating it.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/github");
+        if (!res.ok || cancelled) return;
+        const status = (await res.json()) as GitHubStatusPayload;
+        if (!cancelled) setGithub(status);
+      } catch {
+        // No GitHub submission this session; Generate Prompt still works.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /**
+   * Pull the diff on disk back in after it changed underneath the review.
+   * The structure described the old code, so it goes back to a file plan —
+   * but the comments are the user's work and are carried across.
+   */
+  async function refreshDiff(): Promise<void> {
+    if (scopeBusy) return;
+    setScopeBusy(true);
+    cancelStreamRef.current?.();
+    cancelStreamRef.current = undefined;
+    try {
+      const res = await fetch("/api/session");
+      if (!res.ok) throw new Error(`Could not reload the diff (${res.status}).`);
+      const session = (await res.json()) as ReviewSessionPayload;
+      const drafts = useReviewStore.getState().draftComments;
+      applyMeta(session);
+      installFilePlan(session);
+      useReviewStore.setState({ draftComments: drafts });
+      setStale(false);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Could not reload the diff.";
+      useReviewStore.getState().setError(message);
+    } finally {
+      setScopeBusy(false);
+    }
+  }
+
+  /**
+   * Throw the saved review away and begin the same diff again: no structure,
+   * no comments, back to one unit per file.
+   */
+  async function startOver(): Promise<void> {
+    if (scopeBusy) return;
+    setScopeBusy(true);
+    cancelStreamRef.current?.();
+    cancelStreamRef.current = undefined;
+    try {
+      const key = useReviewStore.getState().sessionKey;
+      if (key) await host.clearSession?.(key);
+      const res = await fetch("/api/session");
+      if (!res.ok) throw new Error(`Could not reload the review (${res.status}).`);
+      const session = (await res.json()) as ReviewSessionPayload;
+      applyMeta(session);
+      // bootReady drops the drafts along with the plan — that is the point.
+      installFilePlan(session);
+      setStale(false);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Could not start the review over.";
+      useReviewStore.getState().setError(message);
+    } finally {
+      setScopeBusy(false);
+    }
+  }
 
   async function selectScope(scope: string) {
     if (scope === selectedScope || scopeBusy) return;
@@ -189,8 +269,10 @@ export function App() {
       if (!res.ok) {
         throw new Error(body.error ?? `Could not load that diff (${res.status}).`);
       }
-      installFilePlan(body);
       setStale(false);
+      applyMeta(body);
+      // Each scope is its own review; switching back to one resumes it.
+      if (!(await resumeSession(body))) installFilePlan(body);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Could not load that diff.";
       useReviewStore.getState().setError(message);
@@ -238,13 +320,16 @@ export function App() {
       void selectScope(id);
     },
     onStructureReview: startStructure,
+    onStartOver: () => {
+      void startOver();
+    },
     structuring,
     structured,
     scopeBusy,
     structureWith,
     stale,
     onRefresh: () => {
-      window.location.reload();
+      void refreshDiff();
     },
   };
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   defaultModelFor,
   getProvider,
+  modelSupportsEffort,
   modelsForProvider,
   MODELS,
   normalizeProviderSettings,
@@ -68,6 +69,14 @@ describe("provider catalog", () => {
   it("falls back to anthropic for an unrecognized provider id", () => {
     expect(normalizeProviderSettings({ provider: "nope", model: "x" }).provider).toBe("anthropic");
     expect(normalizeProviderSettings({ provider: "gemini" }).provider).toBe("anthropic");
+  });
+
+  it("allows a reasoning effort only on models that take one", () => {
+    expect(modelSupportsEffort("claude-opus-5")).toBe(true);
+    expect(modelSupportsEffort("claude-opus-4-8")).toBe(true);
+    // The Messages API rejects an effort on Haiku 4.5, and on ids we don't know.
+    expect(modelSupportsEffort("claude-haiku-4-5-20251001")).toBe(false);
+    expect(modelSupportsEffort("opus")).toBe(false);
   });
 
   it("gives every model a non-empty display name and a known provider", () => {

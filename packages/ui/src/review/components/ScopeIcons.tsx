@@ -24,9 +24,10 @@ const ADD_WASH = "fill-[color-mix(in_srgb,var(--color-success)_32%,transparent)]
 const DEL_WASH = "fill-[color-mix(in_srgb,var(--color-danger)_28%,transparent)]";
 const BAR = "fill-[var(--color-faint)]";
 
-type Kind = "branch" | "uncommitted" | "staged" | "unstaged" | "commit";
+type Kind = "everything" | "branch" | "uncommitted" | "staged" | "unstaged" | "commit";
 
 export function scopeIconKind(scope: Pick<LocalDiffScopeOption, "id" | "label">): Kind {
+  if (scope.id === "everything") return "everything";
   if (scope.id === "branch") return "branch";
   if (scope.id === "unstaged") return "unstaged";
   if (scope.id === "uncommitted") {
@@ -114,6 +115,63 @@ function BranchIcon(props: SVGProps<SVGSVGElement>) {
         strokeWidth="1.2"
       />
       <rect x="4.25" y="14.95" width="6" height="1.8" rx="0.9" className={BAR} opacity="0.65" />
+    </svg>
+  );
+}
+
+/** Commits and working tree in one — a commit card stacked over a live hunk. */
+function EverythingIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...frame(props)}>
+      <rect
+        x="1.6"
+        y="1.6"
+        width="16.8"
+        height="16.8"
+        rx="4"
+        className={SURFACE}
+        strokeWidth="1.2"
+      />
+      <rect
+        x="3.1"
+        y="3.2"
+        width="13.8"
+        height="3.9"
+        rx="1.35"
+        className={ACCENT_WASH}
+        strokeWidth="1.1"
+      />
+      <rect
+        x="4.5"
+        y="4.4"
+        width="7.2"
+        height="1.5"
+        rx="0.75"
+        className="fill-[var(--color-primary)]"
+        opacity="0.9"
+      />
+      <rect x="3.1" y="8.05" width="13.8" height="3.75" rx="1.2" className={ADD_WASH} />
+      <Plus x={4.25} y={9.9} />
+      <rect
+        x="7.7"
+        y="9.15"
+        width="7"
+        height="1.5"
+        rx="0.75"
+        className="fill-[var(--color-success)]"
+        opacity="0.85"
+      />
+      <rect x="3.1" y="12.65" width="13.8" height="3.75" rx="1.2" className={DEL_WASH} />
+      <Minus x={4.25} y={14.5} />
+      <rect
+        x="7.7"
+        y="13.75"
+        width="5.6"
+        height="1.5"
+        rx="0.75"
+        className="fill-[var(--color-danger)]"
+        opacity="0.85"
+      />
     </svg>
   );
 }
@@ -276,6 +334,7 @@ function CommitIcon(props: SVGProps<SVGSVGElement>) {
 }
 
 const ICONS: Record<Kind, (props: SVGProps<SVGSVGElement>) => ReturnType<typeof BranchIcon>> = {
+  everything: EverythingIcon,
   branch: BranchIcon,
   uncommitted: UncommittedIcon,
   staged: StagedIcon,

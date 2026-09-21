@@ -2,7 +2,13 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { Options } from "./Options";
-import { defaultModelFor } from "@guided-review/core";
+import { defaultModelFor, MODELS, type ProviderId } from "@guided-review/core";
+
+/** Label the model dropdown shows for a provider's default, per the catalog. */
+function defaultModelLabel(provider: ProviderId): string {
+  const id = defaultModelFor(provider);
+  return MODELS.find((model) => model.id === id)?.displayName ?? id;
+}
 
 async function chooseOption(
   user: ReturnType<typeof userEvent.setup>,
@@ -37,7 +43,9 @@ describe("Options", () => {
     expect(await screen.findByRole("combobox", { name: /provider/i })).toHaveTextContent(
       "Claude (Anthropic)",
     );
-    expect(screen.getByRole("combobox", { name: /model/i })).toHaveTextContent("Claude Opus 4.8");
+    expect(screen.getByRole("combobox", { name: /model/i })).toHaveTextContent(
+      defaultModelLabel("anthropic"),
+    );
     expect(screen.getByLabelText(/api key/i)).toHaveValue("");
   });
 
@@ -48,7 +56,9 @@ describe("Options", () => {
     await screen.findByRole("combobox", { name: /provider/i });
     await chooseOption(user, /provider/i, /Grok/);
 
-    expect(screen.getByRole("combobox", { name: /model/i })).toHaveTextContent("Grok 4");
+    expect(screen.getByRole("combobox", { name: /model/i })).toHaveTextContent(
+      defaultModelLabel("grok"),
+    );
   });
 
   it("saves the on-screen settings to chrome.storage.local and shows Saved", async () => {

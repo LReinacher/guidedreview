@@ -89,7 +89,15 @@ describe("withHunkGaps", () => {
     const b = hunk({ id: "f#1", newStart: 20, newLines: 2, oldStart: 18, oldLines: 2 });
     expect(withHunkGaps([a, b])).toEqual([
       { kind: "hunk", hunk: a },
-      { kind: "gap", afterLine: 4, key: "gap-f#0-f#1" },
+      {
+        kind: "gap",
+        key: "gap-f#0-f#1",
+        afterOldLine: 3,
+        afterNewLine: 4,
+        beforeOldLine: 18,
+        beforeNewLine: 20,
+        size: 15,
+      },
       { kind: "hunk", hunk: b },
     ]);
   });
@@ -103,11 +111,47 @@ describe("withHunkGaps", () => {
     ]);
   });
 
+  it("marks the file's own edges only when asked", () => {
+    const only = hunk({ id: "f#0", newStart: 21, newLines: 3, oldStart: 21, oldLines: 2 });
+    expect(withHunkGaps([only])).toEqual([{ kind: "hunk", hunk: only }]);
+    expect(withHunkGaps([only], { fileEdges: true })).toEqual([
+      {
+        kind: "gap",
+        key: "gap-top-f#0",
+        afterOldLine: 0,
+        afterNewLine: 0,
+        beforeOldLine: 21,
+        beforeNewLine: 21,
+        size: 20,
+      },
+      { kind: "hunk", hunk: only },
+      // How much file is left below is unknown until the host is asked.
+      { kind: "tail", key: "gap-end-f#0", afterOldLine: 22, afterNewLine: 23 },
+    ]);
+  });
+
+  it("has no gap above a hunk that already starts at line 1", () => {
+    const first = hunk({ id: "f#0", newStart: 1, newLines: 3, oldStart: 1, oldLines: 3 });
+    expect(withHunkGaps([first], { fileEdges: true })).toEqual([
+      { kind: "hunk", hunk: first },
+      { kind: "tail", key: "gap-end-f#0", afterOldLine: 3, afterNewLine: 3 },
+    ]);
+  });
+
   it("inserts a gap when a unit skips an intermediate hunk", () => {
     const first = hunk({ id: "f#0", newStart: 1, newLines: 3, oldStart: 1, oldLines: 3 });
     const third = hunk({ id: "f#2", newStart: 40, newLines: 5, oldStart: 38, oldLines: 5 });
     const seq = withHunkGaps([first, third]);
     expect(seq).toHaveLength(3);
-    expect(seq[1]).toEqual({ kind: "gap", afterLine: 3, key: "gap-f#0-f#2" });
+    expect(seq[1]).toEqual({
+      kind: "gap",
+      key: "gap-f#0-f#2",
+      afterOldLine: 3,
+      afterNewLine: 3,
+      beforeOldLine: 38,
+      beforeNewLine: 40,
+      // 36 lines the patch never showed, expandable a chunk at a time.
+      size: 36,
+    });
   });
 });

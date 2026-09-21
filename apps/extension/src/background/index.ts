@@ -35,8 +35,12 @@ import {
 } from "@extension/lib/github/oauthConfig";
 import { fetchPRDiff, parsePRUrl } from "@extension/lib/github/diffFetch";
 import { fetchRawFilePreview } from "@extension/lib/github/rawFile";
-import { submitPullRequestReview } from "@extension/lib/github/submitReview";
-import { annotateReview, getProviderClient, ProviderError } from "@guided-review/core";
+import {
+  annotateReview,
+  getProviderClient,
+  ProviderError,
+  submitPullRequestReview,
+} from "@guided-review/core";
 import { getProviderSettings } from "@extension/lib/settings";
 import { grantSessionAccessToContentScripts } from "@extension/lib/storage";
 
@@ -410,6 +414,7 @@ async function handleSubmitReview(request: SubmitReviewRequest): Promise<SubmitR
     body: request.body,
     event: request.event,
     comments: request.comments,
+    reconnectHint: "Reconnect GitHub in the extension options.",
   });
 
   // Stale / revoked token: drop the stored session so Options shows disconnected.

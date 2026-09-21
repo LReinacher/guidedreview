@@ -12,6 +12,7 @@ const draft: DraftComment = {
   lineIds: ["a", "b"],
   selectedCode: "const a = 1;\nconst b = 2;",
   body: "Looks good",
+  target: "github",
 };
 
 describe("DraftCommentCard", () => {

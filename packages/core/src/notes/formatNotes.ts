@@ -1,8 +1,10 @@
 import type { ReviewNote } from "../types";
 
 function lineRangeLabel(note: ReviewNote): string {
-  if (note.startLine === note.endLine) return `${note.filePath}:L${note.startLine}`;
-  return `${note.filePath}:L${note.startLine}–L${note.endLine}`;
+  const { startLine, endLine } = note;
+  if (startLine === undefined || endLine === undefined) return note.filePath;
+  if (startLine === endLine) return `${note.filePath}:L${startLine}`;
+  return `${note.filePath}:L${startLine}–L${endLine}`;
 }
 
 /**

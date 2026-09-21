@@ -29,7 +29,20 @@ interface ModelDefinition {
   /** Human-readable label shown in the model dropdown. */
   displayName: string;
   provider: ProviderId;
+  /**
+   * Model accepts a reasoning-effort setting. Omitted means it does not —
+   * sending one anyway is a hard request error, so we leave it off and take
+   * the provider default.
+   */
+  supportsEffort?: boolean;
 }
+
+/**
+ * Reasoning effort every provider is asked for. Planning the walkthrough is
+ * the intelligence-sensitive step of the product, so it always runs high
+ * rather than trading review quality for tokens.
+ */
+export const REVIEW_EFFORT = "high";
 
 /** Providers keyed by id. Key order is display order. */
 export const PROVIDERS: Record<ProviderId, ProviderDefinition> = {
@@ -38,7 +51,7 @@ export const PROVIDERS: Record<ProviderId, ProviderDefinition> = {
     displayName: "Claude (Anthropic)",
     keyPlaceholder: "sk-ant-…",
     iconSrc: "providers/claude.svg",
-    defaultModelId: "claude-opus-4-8",
+    defaultModelId: "claude-opus-5",
   },
   openai: {
     id: "openai",
@@ -65,10 +78,37 @@ export const PROVIDER_LIST: readonly ProviderDefinition[] = Object.values(PROVID
  */
 export const MODELS: readonly ModelDefinition[] = [
   // --- Anthropic ---
-  { id: "claude-opus-4-8", displayName: "Claude Opus 4.8", provider: "anthropic" },
-  { id: "claude-opus-4-7", displayName: "Claude Opus 4.7", provider: "anthropic" },
-  { id: "claude-sonnet-5", displayName: "Claude Sonnet 5", provider: "anthropic" },
-  { id: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6", provider: "anthropic" },
+  {
+    id: "claude-opus-5",
+    displayName: "Claude Opus 5",
+    provider: "anthropic",
+    supportsEffort: true,
+  },
+  {
+    id: "claude-opus-4-8",
+    displayName: "Claude Opus 4.8",
+    provider: "anthropic",
+    supportsEffort: true,
+  },
+  {
+    id: "claude-opus-4-7",
+    displayName: "Claude Opus 4.7",
+    provider: "anthropic",
+    supportsEffort: true,
+  },
+  {
+    id: "claude-sonnet-5",
+    displayName: "Claude Sonnet 5",
+    provider: "anthropic",
+    supportsEffort: true,
+  },
+  {
+    id: "claude-sonnet-4-6",
+    displayName: "Claude Sonnet 4.6",
+    provider: "anthropic",
+    supportsEffort: true,
+  },
+  // Haiku 4.5 has no effort knob — the Messages API rejects one.
   { id: "claude-haiku-4-5-20251001", displayName: "Claude Haiku 4.5", provider: "anthropic" },
 
   // --- OpenAI ---
@@ -90,6 +130,14 @@ export const MODELS: readonly ModelDefinition[] = [
 
 export function getProvider(id: ProviderId): ProviderDefinition {
   return PROVIDERS[id];
+}
+
+/**
+ * Whether `REVIEW_EFFORT` may be sent for this model. Unknown ids (a coding
+ * agent's configured model, a hand-edited config) are treated as unsupported.
+ */
+export function modelSupportsEffort(modelId: string): boolean {
+  return MODELS.some((model) => model.id === modelId && model.supportsEffort === true);
 }
 
 export function modelsForProvider(id: ProviderId): ModelDefinition[] {

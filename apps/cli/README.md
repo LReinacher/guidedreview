@@ -51,14 +51,25 @@ npx @guided-review/cli --staged --agent claude-code
 
 The header shows the current branch and the base branch. A dropdown picks the diff:
 
+- **Everything on this branch** — committed, staged, unstaged and untracked work in one diff, versus the base. Offered only when there is uncommitted work on top of commits; otherwise it would just be one of the scopes below.
 - **Branch vs base** — committed work since the branch diverged (`git diff <merge-base> HEAD`)
 - **Uncommitted** — staged and unstaged work versus `HEAD` (untracked included unless `--no-untracked`)
 - **Unstaged** — worktree versus the index only
 - **A specific commit** — that commit’s patch
 
-Default scope: the first non-empty of branch, uncommitted, unstaged, then the newest commit. `--staged` starts on index-only uncommitted work. Base resolution: `--base` → `origin/HEAD` → `main` → `master`.
+Default scope: the first non-empty of branch, uncommitted, unstaged, then the newest commit — pick **Everything** yourself when you want the lot. `--staged` starts on index-only uncommitted work. Base resolution: `--base` → `origin/HEAD` → `main` → `master`.
 
-The walkthrough starts one unit per file. **Structure With AI** on the Change summary card is the opt-in LLM call — it groups related files and adds context; it does not review for you. Line notes stay in the running session (no GitHub submit). **Generate Prompt** builds a coding-agent prompt from those notes and copies it — Guided Review does not send it anywhere.
+The walkthrough starts one unit per file. **Structure With AI** on the Change summary card is the opt-in LLM call — it groups related files and adds context; it does not review for you. **Generate Prompt** builds a coding-agent prompt from your notes and copies it — Guided Review does not send it anywhere.
+
+**Rebuild Structure** on the Change summary card runs the AI pass again over the same diff, keeping your comments; **Start Over** throws the whole review away — structure, position, and comments — and begins that diff again.
+
+A review is saved as you go, under `.git/guided-review/sessions`. Close the tab or lose the process and the next run picks the same review back up: the structure it built, where you were, and every comment you had written. The saved review is keyed by base, branch, and scope — one per diff you review, never leaving the clone.
+
+### Posting to GitHub
+
+If the branch has an open pull request and this machine has GitHub credentials, **Submit Review** posts your comments as a real pull request review — inline comments plus a summary and Comment / Approve / Request changes — and **Generate Prompt** stays available as the second action. Credentials come from `gh auth token`, or `GH_TOKEN` / `GITHUB_TOKEN`; nothing new to log into, and no token is stored by Guided Review.
+
+Each comment picks its own destination as you write it: **GitHub** to post it with the review, **Local** to keep it on this machine for the prompt only. GitHub anchors review comments to the pull request head, so reviewing uncommitted work or a branch you have not pushed shows a warning before you submit. `--no-github` turns the whole thing off.
 
 | Flag              | What                                    |
 | ----------------- | --------------------------------------- |
@@ -67,6 +78,7 @@ The walkthrough starts one unit per file. **Structure With AI** on the Change su
 | `--no-open`       | Print the URL without opening a browser |
 | `--staged`        | Start on staged changes                 |
 | `--no-untracked`  | Skip untracked files                    |
+| `--no-github`     | Never offer to post to the branch's PR  |
 | `--provider <id>` | `anthropic` \| `openai` \| `grok`       |
 | `--model <id>`    | Provider model id                       |
 | `--agent <id>`    | `claude-code` \| `codex` \| `grok`      |

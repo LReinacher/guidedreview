@@ -178,12 +178,15 @@ export type AnnotateReviewStreamEvent =
 
 // ---- Notes (copy / export) --------------------------------------------------
 
-/** One locally saved line note. Hosts map their draft-comment shape onto this. */
+/** One locally saved note. Hosts map their draft-comment shape onto this. */
 export interface ReviewNote {
   filePath: string;
-  /** Inclusive display line numbers (file coordinates). */
-  startLine: number;
-  endLine: number;
+  /**
+   * Inclusive display line numbers (file coordinates). Both omitted when the
+   * note is about the file as a whole.
+   */
+  startLine?: number;
+  endLine?: number;
   body: string;
   /** Review unit id active when the note was saved, if any. */
   unitId?: string;

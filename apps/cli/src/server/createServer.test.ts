@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
@@ -22,6 +22,7 @@ const execFileAsync = promisify(execFile);
 const snapshot: LocalReviewSnapshot = {
   repo: {
     repoRoot: "/tmp/repo",
+    gitDir: "/tmp/repo/.git",
     baseRef: "main",
     headRef: "feat",
     mergeBase: "abc",
@@ -93,11 +94,183 @@ const snapshot: LocalReviewSnapshot = {
     ],
   },
   raw: "",
-  sessionKey: "repo:main:feat:branch:abc",
+  sessionKey: "repo:main:feat:branch",
   empty: false,
 };
 
 describe("createReviewServer", () => {
+  it("re-probes GitHub after a failed credential lookup so connecting mid-review takes effect", async () => {
+    const pullRequest = {
+      owner: "acme",
+      repo: "widget",
+      number: 42,
+      url: "https://github.com/acme/widget/pull/42",
+      title: "Add feat",
+      author: "octocat",
+      baseRefName: "main",
+      headRefName: "feat",
+      headRefOid: "head-sha",
+      isDraft: false,
+    };
+    let loggedIn = false;
+    let probes = 0;
+    const server = createReviewServer({
+      snapshot,
+      settings: { provider: "anthropic", model: "claude-opus-4-8", apiKey: "" },
+      readGitHubTarget: async () => {
+        probes += 1;
+        return loggedIn
+          ? { pullRequest, auth: { login: "octocat" }, reason: null }
+          : { pullRequest, auth: null, reason: "No GitHub credentials." };
+      },
+    });
+    const port = await listen(server);
+    const base = `http://127.0.0.1:${port}`;
+
+    try {
+      expect(await fetch(`${base}/api/github`).then((r) => r.json())).toMatchObject({
+        available: false,
+      });
+
+      // The user runs `gh auth login` in another terminal and hits Check Again.
+      loggedIn = true;
+      expect(await fetch(`${base}/api/github`).then((r) => r.json())).toMatchObject({
+        available: true,
+        login: "octocat",
+      });
+
+      // A working answer is then reused rather than re-shelled for every check.
+      await fetch(`${base}/api/github`);
+      expect(probes).toBe(2);
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((err) => (err ? reject(err) : resolve())),
+      );
+    }
+  });
+
+  it("posts the review to the pull request the branch belongs to", async () => {
+    const pullRequest = {
+      owner: "acme",
+      repo: "widget",
+      number: 42,
+      url: "https://github.com/acme/widget/pull/42",
+      title: "Add feat",
+      author: "octocat",
+      baseRefName: "main",
+      headRefName: "feat",
+      // Matches the snapshot's branch scope, so no placement warning.
+      headRefOid: "head-sha",
+      isDraft: false,
+    };
+    const calls: { url: string; body: unknown }[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (!url.startsWith("https://api.github.com")) return realFetch(input, init);
+      calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null });
+      if (init?.method === "POST") {
+        return new Response(
+          JSON.stringify({ id: 7, html_url: "https://github.com/acme/widget/pull/42#r7" }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ head: { sha: "head-sha" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof globalThis.fetch;
+
+    const server = createReviewServer({
+      snapshot,
+      settings: { provider: "anthropic", model: "claude-opus-4-8", apiKey: "" },
+      readGitHubTarget: async () => ({
+        pullRequest,
+        auth: { login: "octocat" },
+        reason: null,
+      }),
+      resolveGitHubToken: async () => ({ token: "tok", source: "gh" as const }),
+    });
+    const port = await listen(server);
+    const base = `http://127.0.0.1:${port}`;
+
+    try {
+      const status = await fetch(`${base}/api/github`).then((r) => r.json());
+      expect(status).toMatchObject({ available: true, login: "octocat" });
+
+      const result = await fetch(`${base}/api/github/review`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          body: "Looks good",
+          event: "APPROVE",
+          comments: [{ path: "src/a.ts", body: "inline note", side: "RIGHT", line: 3 }],
+        }),
+      }).then((r) => r.json());
+
+      expect(result).toMatchObject({ ok: true, reviewId: 7 });
+      const posted = calls.find((call) => call.url.endsWith("/reviews"));
+      expect(posted?.body).toMatchObject({
+        event: "APPROVE",
+        body: "Looks good",
+        commit_id: "head-sha",
+        comments: [{ path: "src/a.ts", body: "inline note", side: "RIGHT", line: 3 }],
+      });
+    } finally {
+      globalThis.fetch = realFetch;
+      await new Promise<void>((resolve, reject) =>
+        server.close((err) => (err ? reject(err) : resolve())),
+      );
+    }
+  });
+
+  it("persists a review under the git dir so a restart resumes it, and never offers GitHub when it is off", async () => {
+    const gitDir = await mkdtemp(path.join(os.tmpdir(), "gr-state-"));
+    const server = createReviewServer({
+      snapshot: { ...snapshot, repo: { ...snapshot.repo, gitDir } },
+      settings: { provider: "anthropic", model: "claude-opus-4-8", apiKey: "" },
+      github: false,
+    });
+    const port = await listen(server);
+    const base = `http://127.0.0.1:${port}`;
+    const key = snapshot.sessionKey;
+
+    const empty = await fetch(`${base}/api/review-state?key=${encodeURIComponent(key)}`);
+    expect(await empty.json()).toEqual({ state: null });
+
+    const state = {
+      plan: { units: [{ id: "u1" }] },
+      draftComments: [
+        { id: "d1", target: "github", body: "pending" },
+        { id: "d2", target: "local", body: "note" },
+      ],
+    };
+    const saved = await fetch(`${base}/api/review-state`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ key, state }),
+    });
+    expect(saved.status).toBe(200);
+
+    // A restarted CLI reads the same key back with both kinds of comment.
+    const resumed = await fetch(`${base}/api/review-state?key=${encodeURIComponent(key)}`);
+    expect(await resumed.json()).toEqual({ state });
+
+    const github = await fetch(`${base}/api/github`);
+    expect(await github.json()).toMatchObject({ enabled: false, available: false });
+
+    const submitted = await fetch(`${base}/api/github/review`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ body: "hi", event: "COMMENT", comments: [] }),
+    });
+    expect(await submitted.json()).toMatchObject({ ok: false });
+
+    await new Promise<void>((resolve, reject) =>
+      server.close((err) => (err ? reject(err) : resolve())),
+    );
+  });
+
   it("serves the session and streams no_api_key without a key", async () => {
     const { logger, records } = createCapturingLogger();
     const server = createReviewServer({
@@ -382,13 +555,12 @@ describe("createReviewServer", () => {
       const server = createReviewServer({
         snapshot,
         settings: {
-          provider: "anthropic",
-          model: "claude-sonnet-4-6",
-          apiKey: "sk-ant-oat01-live",
+          provider: "grok",
+          model: "grok-4.5",
+          apiKey: "session-jwt",
           authScheme: "bearer",
-          extraHeaders: { "anthropic-beta": "oauth-2025-04-20" },
         },
-        codingAgent: "claude-code",
+        codingAgent: "grok",
       });
       const port = await listen(server);
       const base = `http://127.0.0.1:${port}`;
@@ -396,9 +568,9 @@ describe("createReviewServer", () => {
       const saved = await fetch(`${base}/api/settings`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ provider: "anthropic", model: "claude-opus-4-8" }),
+        body: JSON.stringify({ provider: "grok", model: "grok-4.6" }),
       }).then((r) => r.json() as Promise<{ codingAgent: string | null; hasKey: boolean }>);
-      expect(saved.codingAgent).toBe("claude-code");
+      expect(saved.codingAgent).toBe("grok");
       expect(saved.hasKey).toBe(true);
 
       const file = JSON.parse(await readFile(path.join(dir, "config.json"), "utf8")) as {
@@ -408,7 +580,7 @@ describe("createReviewServer", () => {
       };
       expect(file.apiKey).toBeUndefined();
       expect(file.codingAgent).toBeUndefined();
-      expect(file.model).toBe("claude-opus-4-8");
+      expect(file.model).toBe("grok-4.6");
 
       await new Promise<void>((resolve, reject) =>
         server.close((err) => (err ? reject(err) : resolve())),
@@ -420,13 +592,12 @@ describe("createReviewServer", () => {
       const server = createReviewServer({
         snapshot,
         settings: {
-          provider: "anthropic",
-          model: "claude-sonnet-4-6",
-          apiKey: "sk-ant-oat01-live",
+          provider: "grok",
+          model: "grok-4.5",
+          apiKey: "session-jwt",
           authScheme: "bearer",
-          extraHeaders: { "anthropic-beta": "oauth-2025-04-20" },
         },
-        codingAgent: "claude-code",
+        codingAgent: "grok",
       });
       const port = await listen(server);
       const base = `http://127.0.0.1:${port}`;
@@ -562,8 +733,8 @@ describe("createReviewServer", () => {
             provider: "anthropic",
             auth: {
               provider: "anthropic",
-              secret: "sk-ant-oat01-live",
-              kind: "oauth",
+              secret: "",
+              kind: "cli",
               usableForReview: true,
             },
           },

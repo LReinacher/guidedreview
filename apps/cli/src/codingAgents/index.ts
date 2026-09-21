@@ -3,9 +3,12 @@ export { promptForAgent } from "./prompt";
 export {
   CODING_AGENTS,
   adapterFor,
+  agentRunsLocally,
+  canGenerateReview,
   detectAll,
   parseCodingAgentFlag,
   pickAgent,
+  reviewClientFor,
   settingsFromAuth,
   formatUnusable,
 } from "./registry";

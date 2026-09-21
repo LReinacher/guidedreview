@@ -1,36 +1,41 @@
 export const toc = [
-  { id: "enter-comment-mode", label: "Enter comment mode", level: 2 },
-  { id: "select-lines", label: "Select lines", level: 2 },
+  { id: "comment-on-a-line", label: "Comment on a line", level: 2 },
+  { id: "comment-on-a-file", label: "Comment on a file", level: 2 },
+  { id: "select-lines", label: "Select more lines", level: 2 },
   { id: "write-a-draft", label: "Write a draft", level: 2 },
   { id: "edit-or-remove-drafts", label: "Edit or remove drafts", level: 2 },
   { id: "what-gets-posted", label: "What gets posted", level: 2 },
 ];
 
-# Leave line comments
+# Leave comments
 
-Draft GitHub-style line comments in Guided Review while you [follow the walkthrough](/docs/first-review). On the **Chrome extension**, comments stay local until you [submit a review](/docs/submit-review). On the **CLI**, the same comment mode leaves notes in the local session — there is no GitHub submit; use [Generate Prompt](/docs/generate-prompt) to copy them for a coding agent instead.
+Draft GitHub-style comments in Guided Review while you [follow the walkthrough](/docs/first-review) — on a single line, on a range of lines, or on a whole file. Comments stay local until you [submit a review](/docs/submit-review), on the **Chrome extension** and on the **CLI** alike. Anything you would rather keep off the pull request stays local and feeds [Generate Prompt](/docs/generate-prompt) instead.
 
-You need [GitHub connected](/docs/connect-github) only when you submit from the extension — drafting works either way. Shortcut reference: [Keyboard shortcuts → Comment mode](/docs/keyboard-shortcuts#comment-mode).
+You need [GitHub connected](/docs/connect-github) only when you submit — drafting works either way. The CLI uses the credentials the machine already has ([CLI → Posting to GitHub](/docs/cli#posting-to-github)). Shortcut reference: [Keyboard shortcuts → Comment mode](/docs/keyboard-shortcuts#comment-mode).
 
 <TocCard toc={toc} />
 
-## Enter comment mode
+## Comment on a line
 
-On a unit that has selectable diff lines:
+Hover a diff line and click the **+** in its gutter. The composer opens on that line straight away. Hold `⇧` while clicking a second line to stretch the comment across a range.
 
-1. Press `c`, or use the comment affordance in Guided Review.
-2. The UI switches to **comment mode**: arrow keys move a line cursor on the current unit’s hunks instead of only scrolling the pane.
-3. Press `Esc` (when the composer is closed) to leave comment mode and return to normal navigation.
+Keyboard instead: press `c` to enter **comment mode**, where `↑` / `↓` move a line cursor through the current unit's hunks, then `Enter` opens the composer. `Esc` (with the composer closed) leaves comment mode.
 
-If a unit has no selectable lines (for example [binary / image](/docs/images-and-binaries) or empty context), comment mode has nothing to attach to. How units map to real hunks: [How a review plan works](/docs/how-it-works).
+If a unit has no selectable lines (for example [binary / image](/docs/images-and-binaries) or empty context), there is nothing to attach a line comment to. How units map to real hunks: [How a review plan works](/docs/how-it-works).
 
-## Select lines
+## Comment on a file
 
-| Action           | How                          |
-| ---------------- | ---------------------------- |
-| Move the cursor  | `↑` / `↓`                    |
-| Multi-line range | Hold `⇧` and press `↑` / `↓` |
-| Open composer    | `Enter` on the selection     |
+Click **Comment** in a file's path header to write about the file as a whole — architecture, naming, "this belongs somewhere else" — rather than one line. The draft appears under the header instead of inside the diff.
+
+The extension posts these as GitHub file-level comments (`subject_type: "file"`); in the CLI they become notes with no line range in [Generate Prompt](/docs/generate-prompt).
+
+## Select more lines
+
+| Action           | How                                          |
+| ---------------- | -------------------------------------------- |
+| Move the cursor  | `↑` / `↓`                                    |
+| Multi-line range | Hold `⇧` and press `↑` / `↓`, or `⇧` + click |
+| Open composer    | `Enter` on the selection                     |
 
 Selection is limited to lines Guided Review can map on the current diff (on the extension, lines that can become a GitHub review comment). Context-only lines may not all be selectable. Full chord list: [Keyboard shortcuts](/docs/keyboard-shortcuts#comment-mode).
 
@@ -40,7 +45,7 @@ Selection is limited to lines Guided Review can map on the current diff (on the 
 2. Write the comment body. Markdown is supported (same idea as github.com).
 3. Save with `⌘/Ctrl` + `Enter`, or cancel with `Esc`.
 
-Drafts appear under the line range as **Draft** cards. They are stored with the active [review session](/docs/first-review#resume-later) until you submit or discard them — they do not leave the browser until submit ([Privacy & data](/docs/privacy-and-data#what-stays-local)).
+Drafts appear under the line range (or under the file header) as **Draft** cards. They are stored with the active [review session](/docs/first-review#resume-later) until you submit or discard them — they do not leave the browser until submit ([Privacy & data](/docs/privacy-and-data#what-stays-local)).
 
 ## Edit or remove drafts
 
@@ -53,7 +58,7 @@ You can keep walking units and add more drafts before [submitting once](/docs/su
 
 ## What gets posted
 
-**Extension:** Nothing is sent to GitHub until you open **Submit Review** and confirm. Then every remaining draft is included as line comments on that review, along with the overall event type and optional summary. Details: [Submit a review](/docs/submit-review).
+**Extension:** Nothing is sent to GitHub until you open **Submit Review** and confirm. Then every remaining draft is included on that review — line comments on their ranges, file comments on their files, along with the overall event type and optional summary. Details: [Submit a review](/docs/submit-review).
 
 If the PR diff has changed since you drafted (rebase, force-push, new commits), GitHub may reject some line anchors — you’ll see an error on submit ([Troubleshooting](/docs/troubleshooting#github-connect-and-submit)). Re-open the review, refresh the plan if needed, and re-draft on the current lines.
 

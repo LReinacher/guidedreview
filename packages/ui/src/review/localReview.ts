@@ -56,7 +56,10 @@ export interface LocalDiffControls {
   selectedScope: string;
   commits: LocalCommitCard[];
   onSelectScope: (id: string) => void;
+  /** Build the AI structure, or rebuild it when one is already in place. */
   onStructureReview: () => void;
+  /** Discard the saved review — structure, position, and comments — and restart it. */
+  onStartOver?: () => void;
   structuring: boolean;
   structured: boolean;
   scopeBusy?: boolean;

@@ -22,16 +22,30 @@ async function git(cwd: string, args: string[]): Promise<void> {
   await execFileAsync("git", args, { cwd });
 }
 
-/** Branch `feat` vs `main` plus an uncommitted `dirty.ts` — same shape as createServer tests. */
+/**
+ * Branch `feat` vs `main` plus an uncommitted `dirty.ts` — same shape as
+ * createServer tests. `lib/helper.ts` is only on main, so the branch diff is
+ * unchanged by it while go-to-definition has somewhere off-diff to land.
+ */
 async function createReviewRepo(root: string): Promise<void> {
   await git(root, ["init", "-b", "main"]);
   await git(root, ["config", "user.email", "e2e@example.com"]);
   await git(root, ["config", "user.name", "E2E"]);
   await writeFile(path.join(root, "readme.md"), "hello\n");
-  await git(root, ["add", "readme.md"]);
+  await mkdir(path.join(root, "lib"), { recursive: true });
+  // Long enough that the declaration preview has something to scroll.
+  const helperBody = Array.from({ length: 40 }, (_, i) => `  const step${i} = ${i};`).join("\n");
+  await writeFile(
+    path.join(root, "lib/helper.ts"),
+    `export function helperFn(value: number): number {\n${helperBody}\n  return value + 1;\n}\n`,
+  );
+  await git(root, ["add", "readme.md", "lib/helper.ts"]);
   await git(root, ["commit", "-m", "initial"]);
   await git(root, ["checkout", "-b", "feat"]);
-  await writeFile(path.join(root, "feat.ts"), "export const n = 1;\n");
+  await writeFile(
+    path.join(root, "feat.ts"),
+    'import { helperFn } from "./lib/helper";\n\nexport const n = helperFn(1);\n',
+  );
   await git(root, ["add", "feat.ts"]);
   await git(root, ["commit", "-m", "add feat"]);
   await writeFile(path.join(root, "dirty.ts"), "export const d = 1;\n");

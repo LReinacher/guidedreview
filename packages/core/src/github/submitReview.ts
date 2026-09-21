@@ -1,18 +1,21 @@
 /**
  * Create a submitted pull request review via the GitHub REST API.
- * Pure HTTP — auth token is provided by the caller (background worker).
+ * Pure HTTP — the caller supplies the token, so both the extension (OAuth
+ * device flow) and the CLI (`gh auth token` / GITHUB_TOKEN) share this.
  *
  * @see https://docs.github.com/en/rest/pulls/reviews#create-a-review-for-a-pull-request
  */
 
-import type { ReviewCommentInput, ReviewEvent, SubmitReviewResponse } from "@extension/lib/types";
-import { EMPTY_REVIEW_BODY_MESSAGE } from "@extension/lib/types";
-import type { PRIdentity } from "./diffFetch";
+import type { PRIdentity, ReviewCommentInput, ReviewEvent, SubmitReviewResponse } from "./types";
+import { EMPTY_REVIEW_BODY_MESSAGE } from "./types";
 
 type SubmitReviewFailure = Extract<SubmitReviewResponse, { ok: false }>;
 
 const API_VERSION = "2022-11-28";
 const ACCEPT = "application/vnd.github+json";
+
+/** Told to the user when GitHub rejects the token. Hosts re-auth differently. */
+const DEFAULT_RECONNECT_HINT = "Reconnect GitHub and try again.";
 
 interface SubmitPullRequestReviewParams {
   accessToken: string;
@@ -20,6 +23,8 @@ interface SubmitPullRequestReviewParams {
   body: string;
   event: ReviewEvent;
   comments: ReviewCommentInput[];
+  /** How this host tells the user to re-authenticate (options page vs `gh auth login`). */
+  reconnectHint?: string;
 }
 
 /**
@@ -33,6 +38,7 @@ export async function submitPullRequestReview(
   params: SubmitPullRequestReviewParams,
 ): Promise<SubmitReviewResponse> {
   const { accessToken, pr, event, comments } = params;
+  const reconnectHint = params.reconnectHint ?? DEFAULT_RECONNECT_HINT;
   const body = params.body.trim();
 
   if ((event === "COMMENT" || event === "REQUEST_CHANGES") && body.length === 0) {
@@ -43,7 +49,7 @@ export async function submitPullRequestReview(
     };
   }
 
-  const head = await fetchPullHeadSha(accessToken, pr);
+  const head = await fetchPullHeadSha(accessToken, pr, reconnectHint);
   if (!head.ok) return head;
 
   const url = `https://api.github.com/repos/${pr.owner}/${pr.repo}/pulls/${pr.number}/reviews`;
@@ -75,6 +81,7 @@ export async function submitPullRequestReview(
     return mapHttpError(response.status, responseBody, {
       action: "submitting the review",
       pr,
+      reconnectHint,
     });
   }
 
@@ -94,6 +101,7 @@ export async function submitPullRequestReview(
 async function fetchPullHeadSha(
   accessToken: string,
   pr: PRIdentity,
+  reconnectHint: string,
 ): Promise<{ ok: true; sha: string } | SubmitReviewFailure> {
   const url = `https://api.github.com/repos/${pr.owner}/${pr.repo}/pulls/${pr.number}`;
 
@@ -117,6 +125,7 @@ async function fetchPullHeadSha(
     return mapHttpError(response.status, body, {
       action: "loading the pull request",
       pr,
+      reconnectHint,
     });
   }
 
@@ -138,6 +147,10 @@ async function fetchPullHeadSha(
 }
 
 function toApiComment(comment: ReviewCommentInput): Record<string, unknown> {
+  // A whole-file comment carries no anchor; GitHub rejects line/side with it.
+  if (comment.subjectType === "file") {
+    return { path: comment.path, body: comment.body, subject_type: "file" };
+  }
   const api: Record<string, unknown> = {
     path: comment.path,
     body: comment.body,
@@ -164,7 +177,7 @@ function githubApiHeaders(accessToken: string): Record<string, string> {
 function mapHttpError(
   status: number,
   body: Record<string, unknown> | null,
-  ctx: { action: string; pr: PRIdentity },
+  ctx: { action: string; pr: PRIdentity; reconnectHint: string },
 ): SubmitReviewFailure {
   const apiDetail = githubErrorDetail(body);
   const prLabel = formatPr(ctx.pr);
@@ -176,7 +189,7 @@ function mapHttpError(
       error: composeError(
         `GitHub rejected the token while ${ctx.action} for ${prLabel} (HTTP 401).`,
         apiDetail,
-        "Reconnect GitHub in the extension options.",
+        ctx.reconnectHint,
       ),
     };
   }
@@ -188,7 +201,7 @@ function mapHttpError(
       error: composeError(
         `Permission denied while ${ctx.action} for ${prLabel} (HTTP 403).`,
         apiDetail,
-        "You don’t have permission to review this pull request, or the OAuth app lacks the required scope.",
+        "You don’t have permission to review this pull request, or the token lacks the required scope.",
       ),
     };
   }
@@ -200,7 +213,7 @@ function mapHttpError(
       error: composeError(
         `Could not access ${prLabel} while ${ctx.action} (HTTP 404).`,
         apiDetail,
-        "Confirm the PR still exists and that your connected GitHub account can open it. For private org repos, authorize SSO for the Guided Review token (GitHub → Settings → Applications) or reconnect GitHub with repo access in Options.",
+        `Confirm the PR still exists and that your GitHub account can open it. For private org repos, authorize SSO for the token (GitHub → Settings → Applications). ${ctx.reconnectHint}`,
       ),
     };
   }

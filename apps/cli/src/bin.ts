@@ -9,6 +9,7 @@ import { buildLocalReview, reviewHasChanges } from "./git/localDiff";
 import { createCliDisplay } from "./display";
 import { createLogger, labeled } from "./log";
 import { createReviewServer, createServerShutdown, listen } from "./server/createServer";
+import { canGenerateReview } from "./codingAgents";
 
 function openBrowser(url: string): void {
   const command =
@@ -51,6 +52,7 @@ async function main(): Promise<void> {
     snapshot: local,
     settings,
     codingAgent,
+    github: args.github,
     staticDir,
     logger,
     onStatus: (patch) => display.setStatus(patch),
@@ -73,7 +75,7 @@ async function main(): Promise<void> {
     provider: settings.provider,
     model: settings.model,
     agent: codingAgent ?? null,
-    hasKey: Boolean(settings.apiKey),
+    ready: canGenerateReview(settings, codingAgent),
     lastPullAt: new Date(),
     diffFresh: "up to date",
   });

@@ -13,6 +13,7 @@ const settings: PublicSettings = {
   hasKey: true,
   last4: "key1",
   codingAgent: null,
+  ready: true,
   configPath: "/tmp/guided-review/config.json",
 };
 
@@ -229,7 +230,7 @@ describe("Settings", () => {
     vi.stubGlobal(
       "fetch",
       mockFetch({
-        settings: { ...settings, hasKey: false, last4: null },
+        settings: { ...settings, hasKey: false, last4: null, ready: false },
       }),
     );
     render(<Settings />);

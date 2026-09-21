@@ -1,5 +1,6 @@
 import {
   displayLineNumber,
+  isLineComment,
   linesInSelection,
   type DraftComment,
   type LineSelection,
@@ -24,6 +25,7 @@ export function deriveSelection(
   composerPlacementId: string | null;
   composerRange: ComposerRange;
   draftsByEndLineId: Map<string, DraftComment[]>;
+  fileDraftsByPath: Map<string, DraftComment[]>;
 } {
   const selected = lineSelection ? linesInSelection(selectableLines, lineSelection) : [];
   const selectedIds = new Set(selected.map((l) => l.id));
@@ -51,8 +53,15 @@ export function deriveSelection(
   }
 
   const draftsByEndLineId = new Map<string, DraftComment[]>();
+  const fileDraftsByPath = new Map<string, DraftComment[]>();
   for (const draft of draftComments) {
     if (!filePaths.has(draft.filePath)) continue;
+    if (!isLineComment(draft)) {
+      const list = fileDraftsByPath.get(draft.filePath) ?? [];
+      list.push(draft);
+      fileDraftsByPath.set(draft.filePath, list);
+      continue;
+    }
     const endId = draft.lineIds[draft.lineIds.length - 1];
     if (!endId) continue;
     const list = draftsByEndLineId.get(endId) ?? [];
@@ -66,5 +75,6 @@ export function deriveSelection(
     composerPlacementId,
     composerRange,
     draftsByEndLineId,
+    fileDraftsByPath,
   };
 }

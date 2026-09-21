@@ -29,7 +29,7 @@ Typical loop:
 
 Generate Prompt is built only from the notes in the current session. With **zero notes**, the header button stays disabled and `⌘/Ctrl` + `Enter` does nothing useful — leave at least one draft first ([comment mode](/docs/keyboard-shortcuts#comment-mode)).
 
-Notes live in memory with the running CLI server. Stopping the process (Ctrl+C) clears them ([Troubleshooting → Session and resume](/docs/troubleshooting#session-and-resume)).
+Notes are saved with the review in the repo's git dir, so stopping the process (Ctrl+C) does not lose them — the next run resumes where you left off ([CLI](/docs/cli), [Troubleshooting → Session and resume](/docs/troubleshooting#session-and-resume)).
 
 ## Open Generate Prompt
 

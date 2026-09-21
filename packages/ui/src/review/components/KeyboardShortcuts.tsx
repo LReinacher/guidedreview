@@ -30,6 +30,11 @@ const SHORTCUTS: readonly ShortcutRow[] = [
     join: "chord",
     description: "Search Files and Code in This PR",
   },
+  {
+    keys: ["mod", "Click"],
+    join: "chord",
+    description: "Preview Where a Symbol Is Declared",
+  },
   { keys: ["c"], join: "none", description: "Enter Comment Mode" },
   { keys: ["↑", "↓"], join: "none", description: "Select Lines (in Comment Mode)" },
   {

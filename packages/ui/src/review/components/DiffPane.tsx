@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { cn } from "@guided-review/ui";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { cn, confirm } from "@guided-review/ui";
 
 import { isImagePath, type ResolvedUnitFile } from "@guided-review/core";
 import { languageForPath } from "@guided-review/ui/review/highlight";
@@ -12,6 +12,7 @@ import {
 } from "@guided-review/ui/review/commentTypes";
 import type { SearchScrollTarget } from "@guided-review/ui/review/diffSearch";
 import { withHunkGaps } from "@guided-review/ui/review/hunkGaps";
+import { useReviewHost } from "@guided-review/ui/review/host";
 import { hydrateDiffViewMode, useReviewStore } from "@guided-review/ui/review/store";
 import type { DiffViewMode } from "@guided-review/ui/review/diffView";
 import type { ComposerRange } from "@guided-review/ui/review/components/diff/hunkShared";
@@ -20,12 +21,20 @@ import {
   CommentModeChip,
   DiffViewToggle,
 } from "@guided-review/ui/review/components/diff/DiffToolbar";
+import { CommentComposer } from "@guided-review/ui/review/components/CommentComposer";
+import { DraftCommentCard } from "@guided-review/ui/review/components/DraftCommentCard";
 import { BinaryElidedEmptyState } from "@guided-review/ui/review/components/diff/BinaryElidedEmptyState";
+import { FileTailGap } from "@guided-review/ui/review/components/diff/FileTailGap";
 import { HunkGapPlaceholder } from "@guided-review/ui/review/components/diff/HunkGapPlaceholder";
 import { ImageDiff } from "@guided-review/ui/review/components/diff/ImageDiff";
 import { SplitHunk } from "@guided-review/ui/review/components/diff/SplitHunk";
 import { UnifiedHunk } from "@guided-review/ui/review/components/diff/UnifiedHunk";
 import { deriveSelection } from "@guided-review/ui/review/components/diff/deriveSelection";
+import {
+  DefinitionPreview,
+  type DefinitionJumpTarget,
+} from "@guided-review/ui/review/components/diff/DefinitionPreview";
+import { useSymbolNavigation } from "@guided-review/ui/review/useSymbolNavigation";
 import { MiddleEllipsisText } from "./MiddleEllipsisText";
 import { TestsUnitIcon } from "./TestsUnitIcon";
 
@@ -54,6 +63,11 @@ interface DiffPaneProps {
   /** One-shot scroll/highlight target after picking a diff search result. */
   searchScrollTarget?: SearchScrollTarget | null;
   onSearchScrollTargetConsumed?: () => void;
+  /**
+   * Move the review to a line elsewhere in the diff. Owned by Overlay because
+   * the target may live in another review unit.
+   */
+  onJumpToDiffLine?: (target: DefinitionJumpTarget) => void;
 }
 
 /**
@@ -88,11 +102,74 @@ interface DiffFileCardProps {
   selectedIds: Set<string>;
   focusId: string | null;
   draftsByEndLineId: Map<string, DraftComment[]>;
+  fileDrafts: DraftComment[];
   composerPlacementId: string | null;
   composerRange: ComposerRange;
   unitId?: string;
   searchHighlight: SearchScrollTarget | null;
 }
+
+/**
+ * Whole-file comments and the file composer, pinned under the path header so
+ * they read as belonging to the file rather than to any line in it.
+ */
+function FileCommentSection({
+  filePath,
+  drafts,
+  unitId,
+}: {
+  filePath: string;
+  drafts: DraftComment[];
+  unitId?: string;
+}) {
+  const fileComposerPath = useReviewStore((s) => s.fileComposerPath);
+  const closeFileComposer = useReviewStore((s) => s.closeFileComposer);
+  const saveFileComment = useReviewStore((s) => s.saveFileComment);
+  const removeDraftComment = useReviewStore((s) => s.removeDraftComment);
+  const updateDraftComment = useReviewStore((s) => s.updateDraftComment);
+  const setDraftCommentTarget = useReviewStore((s) => s.setDraftCommentTarget);
+  const composerOpen = fileComposerPath === filePath;
+
+  if (!composerOpen && drafts.length === 0) return null;
+
+  function requestRemoveDraft(id: string): void {
+    confirm({
+      title: "Remove Comment?",
+      body: "This comment will be removed. You can comment on this file again later.",
+      variant: "destructive",
+      okButtonText: "Remove",
+      cancelButtonText: "Cancel",
+      okButtonHandler: () => {
+        removeDraftComment(id);
+      },
+    });
+  }
+
+  return (
+    <div className="font-sans" data-testid={`file-comments-${filePath}`}>
+      {drafts.map((draft) => (
+        <DraftCommentCard
+          key={draft.id}
+          comment={draft}
+          onRemove={requestRemoveDraft}
+          onUpdate={updateDraftComment}
+          onTargetChange={setDraftCommentTarget}
+        />
+      ))}
+      {composerOpen && (
+        <CommentComposer
+          filePath={filePath}
+          onSave={(body, target) => saveFileComment(body, unitId, target)}
+          onCancel={closeFileComposer}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Quiet header actions, sized to sit on the file's path bar without shouting. */
+const FILE_ACTION_CLASSES =
+  "shrink-0 cursor-pointer rounded px-1.5 py-0.5 font-sans text-sm text-muted hover:bg-surface-muted hover:text-foreground";
 
 /** One file's path header + hunks (or binary empty state) inside the unit pane. */
 function DiffFileCard({
@@ -101,13 +178,24 @@ function DiffFileCard({
   selectedIds,
   focusId,
   draftsByEndLineId,
+  fileDrafts,
   composerPlacementId,
   composerRange,
   unitId,
   searchHighlight,
 }: DiffFileCardProps) {
+  const openFileComposer = useReviewStore((s) => s.openFileComposer);
+  const host = useReviewHost();
+  const prContext = useReviewStore((s) => s.prContext);
+  // Which gaps in this file currently show revealed lines, and a counter that
+  // remounts every gap — the one-liner way to collapse them all at once.
+  const [expandedGaps, setExpandedGaps] = useState<readonly string[]>([]);
+  const [collapseCount, setCollapseCount] = useState(0);
   const { file, hunks } = resolved;
   const language = languageForPath(file.path);
+  // Only hosts that can read file text can extend a diff past the patch's own
+  // context; the rest keep the gaps the patch already describes.
+  const canReadFile = Boolean(host.fileLines && prContext);
   const extension = file.path.includes(".") ? file.path.split(".").pop() : undefined;
   const imageFile = isImagePath(file.path);
   const pathLabel = file.previousPath ? `${file.previousPath} → ${file.path}` : file.path;
@@ -119,6 +207,18 @@ function DiffFileCard({
       ? searchHighlight.lineId
       : null;
   const effectiveFocusId = focusId ?? searchFocusId;
+
+  const noteExpanded = useCallback((key: string, expanded: boolean) => {
+    setExpandedGaps((prev) => {
+      if (prev.includes(key) === expanded) return prev;
+      return expanded ? [...prev, key] : prev.filter((k) => k !== key);
+    });
+  }, []);
+
+  function collapseExpanded(): void {
+    setCollapseCount((n) => n + 1);
+    setExpandedGaps([]);
+  }
 
   return (
     <div
@@ -139,20 +239,56 @@ function DiffFileCard({
             {extension ? `no syntax highlighting for .${extension}` : "no syntax highlighting"}
           </span>
         )}
+        {expandedGaps.length > 0 && (
+          <button
+            type="button"
+            className={FILE_ACTION_CLASSES}
+            onClick={collapseExpanded}
+            aria-label={`Collapse the expanded lines in ${file.path}`}
+            title="Collapse every line expanded in this file"
+            data-testid="collapse-expanded-button"
+          >
+            Reset
+          </button>
+        )}
+        <button
+          type="button"
+          className={FILE_ACTION_CLASSES}
+          onClick={() => openFileComposer(file.path)}
+          aria-label={`Comment on ${file.path}`}
+          title="Comment on this file"
+          data-testid="comment-file-button"
+        >
+          Comment
+        </button>
       </div>
+      <FileCommentSection filePath={file.path} drafts={fileDrafts} unitId={unitId} />
       <div className="overflow-hidden rounded-b-lg">
         {imageFile ? (
           <ImageDiff file={file} viewMode={diffViewMode} />
         ) : file.isBinaryOrElided ? (
           <BinaryElidedEmptyState filePath={file.path} />
         ) : (
-          withHunkGaps(hunks).map((item) => {
+          withHunkGaps(hunks, { fileEdges: canReadFile }).map((item) => {
+            // Bumping the collapse counter remounts every expander, dropping
+            // the lines they had revealed.
             if (item.kind === "gap") {
               return (
                 <HunkGapPlaceholder
-                  key={item.key}
+                  key={`${item.key}-${collapseCount}`}
                   filePath={file.path}
-                  afterLine={item.afterLine}
+                  gap={item}
+                  onExpandedChange={noteExpanded}
+                />
+              );
+            }
+            if (item.kind === "tail") {
+              return (
+                <FileTailGap
+                  key={`${item.key}-${collapseCount}`}
+                  filePath={file.path}
+                  tail={item}
+                  onExpandedChange={noteExpanded}
                 />
               );
             }
@@ -198,6 +334,7 @@ export function DiffPane({
   selectableForUnit,
   searchScrollTarget = null,
   onSearchScrollTargetConsumed,
+  onJumpToDiffLine,
 }: DiffPaneProps) {
   const diffViewMode = useReviewStore((s) => s.diffViewMode);
   const setDiffViewMode = useReviewStore((s) => s.setDiffViewMode);
@@ -209,6 +346,7 @@ export function DiffPane({
   const enterCommentMode = useReviewStore((s) => s.enterCommentMode);
   const rootRef = useRef<HTMLDivElement>(null);
   const [searchHighlight, setSearchHighlight] = useState<SearchScrollTarget | null>(null);
+  const symbolNav = useSymbolNavigation();
 
   useEffect(() => {
     void hydrateDiffViewMode();
@@ -216,14 +354,20 @@ export function DiffPane({
 
   const filePaths = useMemo(() => new Set(files.map((f) => f.file.path)), [files]);
 
-  const { selectedIds, focusId, composerPlacementId, composerRange, draftsByEndLineId } =
-    deriveSelection(
-      uiMode === "comment" ? selectableLines : [],
-      uiMode === "comment" ? lineSelection : null,
-      composerOpen,
-      draftComments,
-      filePaths,
-    );
+  const {
+    selectedIds,
+    focusId,
+    composerPlacementId,
+    composerRange,
+    draftsByEndLineId,
+    fileDraftsByPath,
+  } = deriveSelection(
+    uiMode === "comment" ? selectableLines : [],
+    uiMode === "comment" ? lineSelection : null,
+    composerOpen,
+    draftComments,
+    filePaths,
+  );
 
   // Scroll the focused line into view when the cursor moves.
   useEffect(() => {
@@ -286,7 +430,14 @@ export function DiffPane({
   );
 
   return (
-    <div ref={rootRef}>
+    <div
+      ref={rootRef}
+      // Modifier held: identifiers read as links, the way an editor shows them.
+      className={cn(symbolNav.modifierHeld && "[&_[data-code-text]]:cursor-pointer")}
+      onClickCapture={symbolNav.onClickCapture}
+      onMouseMove={symbolNav.onMouseMove}
+      onMouseLeave={symbolNav.onMouseLeave}
+    >
       <div
         role="status"
         aria-live="polite"
@@ -321,6 +472,27 @@ export function DiffPane({
           <DiffViewToggle mode={diffViewMode} onChange={setDiffViewMode} />
         </div>
       </div>
+      {symbolNav.modifierHeld &&
+        symbolNav.hovered?.map((box) => (
+          // One bar per wrapped fragment of the identifier, drawn over the
+          // line rather than in it so the diff's own layout never shifts.
+          <span
+            key={`${box.top}-${box.left}`}
+            aria-hidden="true"
+            className="pointer-events-none fixed z-40 border-b border-primary"
+            data-testid="symbol-underline"
+            style={{ left: box.left, top: box.bottom - 1, width: box.right - box.left }}
+          />
+        ))}
+      {symbolNav.lookup && (
+        <DefinitionPreview
+          lookup={symbolNav.lookup}
+          cardRef={symbolNav.cardRef}
+          onClose={symbolNav.close}
+          onShowDefinition={symbolNav.showDefinition}
+          onJump={onJumpToDiffLine}
+        />
+      )}
       {files.map((resolved) => (
         <DiffFileCard
           key={resolved.file.path}
@@ -329,6 +501,7 @@ export function DiffPane({
           selectedIds={selectedIds}
           focusId={focusId}
           draftsByEndLineId={draftsByEndLineId}
+          fileDrafts={fileDraftsByPath.get(resolved.file.path) ?? []}
           composerPlacementId={composerPlacementId}
           composerRange={composerRange}
           unitId={unitId}

@@ -149,7 +149,7 @@ describe("ContextPanel structure trigger", () => {
     expect(logo).toHaveAttribute("aria-hidden", "true");
   });
 
-  it("hides the trigger after the review is structured", () => {
+  it("turns the trigger into a rebuild once the review is structured", () => {
     setActiveReviewHost(
       createMemoryReviewHost({
         kind: "local",
@@ -158,9 +158,19 @@ describe("ContextPanel structure trigger", () => {
       }),
     );
     render(
-      <ContextPanel unit={null} hasTitle hasDescription onStructureReview={vi.fn()} structured />,
+      <ContextPanel
+        unit={null}
+        hasTitle
+        hasDescription
+        onStructureReview={vi.fn()}
+        onStartOver={vi.fn()}
+        structured
+      />,
     );
-    expect(screen.queryByTestId("structure-review")).not.toBeInTheDocument();
+    // The pitch is spent, but the review must stay resettable.
+    expect(screen.getByTestId("structure-review")).toHaveTextContent("Rebuild Structure");
+    expect(screen.queryByTestId("structure-review-provider")).not.toBeInTheDocument();
+    expect(screen.getByTestId("start-over")).toBeInTheDocument();
   });
 
   it("shows structure prompt and shortcuts on empty-context file units", () => {
